@@ -1,0 +1,155 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// HealthCheck model for connection verification
+model HealthCheck {
+  id        Int      @id @default(autoincrement())
+  status    String   @default("ok")
+  checkedAt DateTime @default(now())
+}
+
+// User model for authentication
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  phone     String?  @unique
+  password  String
+  firstName String
+  lastName  String
+  role      Role     @default(CUSTOMER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addresses      Address[]
+  refreshTokens  RefreshToken[]
+
+  @@index([email])
+  @@index([phone])
+}
+
+// Address model for user addresses
+model Address {
+  id        String   @id @default(uuid())
+  userId    String
+  street    String
+  city      String
+  state     String
+  zipCode   String
+  country   String   @default("US")
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields:[userId], references:[id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// RefreshToken model for JWT refresh tokens
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+// Enum for user roles
+enum Role {
+  CUSTOMER
+  STAFF
+  ADMIN
+  OWNER
+}
+
+// Category model for menu categories
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  imageUrl  String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  menuItems MenuItem[]
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+// MenuItem model for menu items
+model MenuItem {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String   @unique
+  description     String
+  price           Decimal  @db.Decimal(10, 2)
+  imageUrl        String
+  preparationTime Int      // in minutes
+  calories        Int?
+  categoryId      String
+  isAvailable     Boolean  @default(true)
+  isFeatured      Boolean  @default(false)
+  isDeleted       Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  category  Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  addOns    AddOn[]
+  images    MenuImage[]
+
+  @@index([categoryId])
+  @@index([slug])
+  @@index([isAvailable])
+  @@index([isFeatured])
+  @@index([isDeleted])
+}
+
+// AddOn model for menu item add-ons
+model AddOn {
+  id            String   @id @default(uuid())
+  menuItemId    String
+  name          String
+  price         Decimal  @db.Decimal(10, 2)
+  isRequired    Boolean  @default(false)
+  maxSelections Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@index([menuItemId])
+}
+
+// MenuImage model for multiple images per menu item
+model MenuImage {
+  id        String   @id @default(uuid())
+  menuItemId String
+  imageUrl  String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@index([menuItemId])
+}
