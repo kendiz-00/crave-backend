@@ -30,8 +30,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  addresses      Address[]
-  refreshTokens  RefreshToken[]
+  addresses         Address[]
+  refreshTokens     RefreshToken[]
+  carts             Cart[]
+  orders            Order[]
+  rewardTransactions RewardTransaction[]
+  rewardCodes       RewardCode[]
 
   @@index([email])
   @@index([phone])
@@ -80,14 +84,15 @@ enum Role {
 
 // Category model for menu categories
 model Category {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  imageUrl  String?
-  sortOrder Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  imageUrl    String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   menuItems MenuItem[]
 
@@ -98,10 +103,12 @@ model Category {
 // MenuItem model for menu items
 model MenuItem {
   id              String   @id @default(uuid())
+  sku             String?  @unique
   name            String
   slug            String   @unique
   description     String
   price           Decimal  @db.Decimal(10, 2)
+  costPrice       Decimal? @db.Decimal(10, 2)
   imageUrl        String
   preparationTime Int      // in minutes
   calories        Int?
@@ -110,18 +117,23 @@ model MenuItem {
   isFeatured      Boolean  @default(false)
   isDeleted       Boolean  @default(false)
   sortOrder       Int      @default(0)
+  displayOrder    Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  category  Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  addOns    AddOn[]
-  images    MenuImage[]
+  category   Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  addOns     AddOn[]
+  images     MenuImage[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
 
   @@index([categoryId])
   @@index([slug])
+  @@index([sku])
   @@index([isAvailable])
   @@index([isFeatured])
   @@index([isDeleted])
+  @@index([displayOrder])
 }
 
 // AddOn model for menu item add-ons
@@ -152,4 +164,217 @@ model MenuImage {
   menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
 
   @@index([menuItemId])
+}
+
+// Enum for cart status
+enum CartStatus {
+  ACTIVE
+  CHECKED_OUT
+  ABANDONED
+}
+
+// Cart model for customer shopping carts
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String
+  status    CartStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// CartItem model for items in cart
+model CartItem {
+  id         String   @id @default(uuid())
+  cartId     String
+  menuItemId String
+  quantity   Int      @default(1)
+  unitPrice  Decimal  @db.Decimal(10, 2)
+  totalPrice Decimal  @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  cart     Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  addOns   CartItemAddOn[]
+
+  @@index([cartId])
+  @@index([menuItemId])
+}
+
+// CartItemAddOn model for add-ons in cart items
+model CartItemAddOn {
+  id         String   @id @default(uuid())
+  cartItemId String
+  addOnId    String
+  name       String
+  price      Decimal  @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+
+  cartItem CartItem @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+
+  @@index([cartItemId])
+}
+
+// Enum for order status
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+// Enum for payment status
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CASH_ON_DELIVERY
+}
+
+// Enum for order type
+enum OrderType {
+  DELIVERY
+  PICKUP
+  DINE_IN
+}
+
+// Order model for customer orders
+model Order {
+  id                  String        @id @default(uuid())
+  orderNumber         String        @unique
+  userId              String
+  status              OrderStatus   @default(PENDING)
+  paymentStatus       PaymentStatus @default(PENDING)
+  orderType           OrderType     @default(DELIVERY)
+  subtotal            Decimal       @db.Decimal(10, 2)
+  discount            Decimal       @default(0) @db.Decimal(10, 2)
+  tax                 Decimal       @default(0) @db.Decimal(10, 2)
+  deliveryFee         Decimal       @default(0) @db.Decimal(10, 2)
+  grandTotal          Decimal       @db.Decimal(10, 2)
+  rewardPointsEarned  Int           @default(0)
+  rewardCodeUsed      String?
+  rewardCodeGenerated String?
+  notes               String?
+  customerName        String
+  customerPhone       String
+  customerEmail       String?
+  deliveryAddress     String?
+  latitude            Decimal?
+  longitude           Decimal?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items            OrderItem[]
+  transactions     RewardTransaction[]
+
+  @@index([userId])
+  @@index([orderNumber])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([createdAt])
+}
+
+// OrderItem model for items in an order
+model OrderItem {
+  id           String   @id @default(uuid())
+  orderId      String
+  menuItemId   String
+  quantity     Int
+  snapshotName String
+  snapshotPrice Decimal  @db.Decimal(10, 2)
+  snapshotImage String
+  snapshotSku   String?
+  subtotal     Decimal  @db.Decimal(10, 2)
+  createdAt    DateTime @default(now())
+
+  order    Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem?    @relation(fields: [menuItemId], references: [id])
+  addOns   OrderItemAddOn[]
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+// OrderItemAddOn model for add-ons in order items
+model OrderItemAddOn {
+  id         String   @id @default(uuid())
+  orderItemId String
+  name       String
+  snapshotPrice Decimal @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderItemId])
+}
+
+// Enum for reward transaction type
+enum RewardTransactionType {
+  EARN
+  REDEEM
+  BONUS
+  ADJUSTMENT
+}
+
+// RewardTransaction model for tracking reward points
+model RewardTransaction {
+  id             String               @id @default(uuid())
+  userId         String
+  orderId        String?
+  type           RewardTransactionType
+  points         Int
+  runningBalance Int
+  reason         String
+  createdAt      DateTime             @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+// Enum for reward code status
+enum RewardCodeStatus {
+  GENERATED
+  REDEEMED
+  EXPIRED
+  CANCELLED
+}
+
+// RewardCode model for generated reward codes
+model RewardCode {
+  id           String           @id @default(uuid())
+  userId       String
+  code         String           @unique
+  reward       String
+  generatedAt  DateTime         @default(now())
+  expiresAt    DateTime
+  redeemedAt   DateTime?
+  redeemedBy   String?
+  orderId      String?
+  status       RewardCodeStatus @default(GENERATED)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([code])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([orderId])
 }

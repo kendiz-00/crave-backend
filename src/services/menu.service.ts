@@ -195,7 +195,7 @@ export class MenuService {
     const skip = (page - 1) * limit;
 
     // Build where clause
-    const where: any = {
+    const where: Record<string, unknown> = {
       isDeleted: false,
     };
 
@@ -225,7 +225,7 @@ export class MenuService {
     }
 
     // Build order by clause
-    let orderBy: any = {};
+    let orderBy: Record<string, 'asc' | 'desc'> = {};
     switch (sort) {
       case 'price-asc':
         orderBy = { price: 'asc' };

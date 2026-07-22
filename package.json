@@ -14,7 +14,11 @@
     "test:coverage": "jest --coverage",
     "clean": "rimraf dist",
     "type-check": "tsc --noEmit",
-    "prebuild": "npm run clean"
+    "prebuild": "npm run clean",
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "keywords": [
     "crave",
