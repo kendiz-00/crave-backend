@@ -52,3 +52,13 @@ export type {
   RedeemRewardCodeInput,
   CreateRewardTransactionInput,
 } from './reward.validator';
+export {
+  initializePaymentSchema,
+  verifyPaymentSchema,
+  refundPaymentSchema,
+} from './payment.validator';
+export type {
+  InitializePaymentInput,
+  VerifyPaymentInput,
+  RefundPaymentInput,
+} from './payment.validator';

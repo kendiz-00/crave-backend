@@ -278,6 +278,7 @@ model Order {
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   items            OrderItem[]
   transactions     RewardTransaction[]
+  payments         Payment[]
 
   @@index([userId])
   @@index([orderNumber])
@@ -377,4 +378,44 @@ model RewardCode {
   @@index([status])
   @@index([expiresAt])
   @@index([orderId])
+}
+
+// Enum for payment method
+enum PaymentMethod {
+  CARD
+  MOBILE_MONEY
+  BANK_TRANSFER
+  USSD
+  QR_CODE
+}
+
+// Enum for payment gateway
+enum PaymentGateway {
+  PAYSTACK
+  STRIPE
+  FLUTTERWAVE
+}
+
+// Payment model for tracking payments
+model Payment {
+  id              String         @id @default(uuid())
+  orderId         String
+  reference       String         @unique
+  amount          Decimal        @db.Decimal(10, 2)
+  currency        String         @default("GHS")
+  method          PaymentMethod
+  gateway         PaymentGateway  @default(PAYSTACK)
+  status          PaymentStatus  @default(PENDING)
+  gatewayResponse Json?
+  metadata        Json?
+  verifiedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([reference])
+  @@index([status])
+  @@index([createdAt])
 }

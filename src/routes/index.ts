@@ -8,6 +8,7 @@ import categoryRoute from '@/routes/category.route';
 import cartRoute from '@/routes/cart.route';
 import orderRoute from '@/routes/order.route';
 import rewardRoute from '@/routes/reward.route';
+import paymentRoute from '@/routes/payment.route';
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use('/api/categories', categoryRoute);
 router.use('/api/cart', cartRoute);
 router.use('/api/orders', orderRoute);
 router.use('/api/rewards', rewardRoute);
+router.use('/api/payments', paymentRoute);
 
 export default router;
