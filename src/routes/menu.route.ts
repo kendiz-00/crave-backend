@@ -10,21 +10,21 @@ import {
   getMenuItemsByCategoryController,
   searchMenuItemsController,
 } from '@/controllers';
-import { authenticate, requireAdmin } from '@/middleware';
+import { authenticate, requireAdmin, cacheMiddleware, clearCache } from '@/middleware';
 
 const router = Router();
 
-// Public GET endpoints
-router.get('/', getMenuItemsController);
-router.get('/featured', getFeaturedMenuItemsController);
-router.get('/search', searchMenuItemsController);
-router.get('/category/:slug', getMenuItemsByCategoryController);
-router.get('/:id', getMenuItemController);
-router.get('/slug/:slug', getMenuItemBySlugController);
+// Public GET endpoints (cached)
+router.get('/', cacheMiddleware(5 * 60 * 1000), getMenuItemsController);
+router.get('/featured', cacheMiddleware(5 * 60 * 1000), getFeaturedMenuItemsController);
+router.get('/search', cacheMiddleware(2 * 60 * 1000), searchMenuItemsController);
+router.get('/category/:slug', cacheMiddleware(5 * 60 * 1000), getMenuItemsByCategoryController);
+router.get('/:id', cacheMiddleware(10 * 60 * 1000), getMenuItemController);
+router.get('/slug/:slug', cacheMiddleware(10 * 60 * 1000), getMenuItemBySlugController);
 
-// Admin/Owner only endpoints
-router.post('/', authenticate, requireAdmin, createMenuItemController);
-router.put('/:id', authenticate, requireAdmin, updateMenuItemController);
-router.delete('/:id', authenticate, requireAdmin, deleteMenuItemController);
+// Admin/Owner only endpoints (clears cache)
+router.post('/', authenticate, requireAdmin, clearCache, createMenuItemController);
+router.put('/:id', authenticate, requireAdmin, clearCache, updateMenuItemController);
+router.delete('/:id', authenticate, requireAdmin, clearCache, deleteMenuItemController);
 
 export default router;

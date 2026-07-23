@@ -9,6 +9,7 @@ import logger from '@/utils/logger';
 import routes from '@/routes';
 import { errorHandler } from '@/middleware/error.middleware';
 import { notFoundHandler } from '@/middleware/notFound.middleware';
+import { securityHeaders, enforceHTTPS } from '@/middleware/security.middleware';
 
 export const createApp = (): Application => {
   const app = express();
@@ -18,14 +19,22 @@ export const createApp = (): Application => {
 
   // Security headers
   app.use(helmet());
+  app.use(securityHeaders);
+  
+  // HTTPS enforcement in production
+  app.use(enforceHTTPS);
 
-  // CORS configuration
+  // CORS configuration - tightened for production
   app.use(
     cors({
       origin: config.isDevelopment
         ? ['http://localhost:3000', 'http://localhost:5173']
         : config.cors.allowedOrigins,
       credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: ['Content-Range', 'X-Content-Range'],
+      maxAge: 86400, // 24 hours
     })
   );
 

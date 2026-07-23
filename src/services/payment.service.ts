@@ -135,7 +135,7 @@ export class PaymentService {
    * Handle successful charge
    */
   private async handleSuccessfulCharge(data: any) {
-    const { reference, amount, customer } = data;
+    const { reference } = data;
 
     const payment = await prisma.payment.findUnique({
       where: { reference },
@@ -227,7 +227,7 @@ export class PaymentService {
       },
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     if (!data.status) {
       throw new ApiError(400, data.message || 'Payment verification failed');
@@ -305,7 +305,7 @@ export class PaymentService {
     }
 
     // Initiate refund with Paystack
-    const refund = await this.initiateRefund(payment.reference, payment.amount, reason);
+    const refund = await this.initiateRefund(payment.reference, Number(payment.amount), reason);
 
     // Update payment status
     await prisma.payment.update({
@@ -314,7 +314,7 @@ export class PaymentService {
         status: PaymentStatus.REFUNDED,
         gatewayResponse: refund,
         metadata: {
-          ...payment.metadata,
+          ...(payment.metadata as any),
           refundReason: reason,
         },
       },
@@ -355,7 +355,7 @@ export class PaymentService {
       }),
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     if (!data.status) {
       throw new ApiError(400, data.message || 'Refund initiation failed');

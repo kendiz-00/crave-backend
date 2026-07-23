@@ -6,15 +6,15 @@ import {
   refreshController,
   meController,
 } from '@/controllers';
-import { authenticate } from '@/middleware';
+import { authenticate, authRateLimiter } from '@/middleware';
 
 const router = Router();
 
 // POST /api/auth/register - Register a new user
-router.post('/register', registerController);
+router.post('/register', authRateLimiter, registerController);
 
 // POST /api/auth/login - Login user
-router.post('/login', loginController);
+router.post('/login', authRateLimiter, loginController);
 
 // POST /api/auth/logout - Logout user
 router.post('/logout', logoutController);

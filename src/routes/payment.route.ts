@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authenticate } from '../middleware/auth.middleware';
+import { paymentRateLimiter } from '../middleware/rateLimit.middleware';
 import { paymentService } from '../services/payment.service';
 import { initializePaymentSchema, verifyPaymentSchema, refundPaymentSchema } from '../validators';
 
@@ -14,6 +15,7 @@ const router = Router();
 router.post(
   '/initialize',
   authenticate,
+  paymentRateLimiter,
   asyncHandler(async (req, res) => {
     const validatedData = initializePaymentSchema.parse(req.body);
 
@@ -39,6 +41,7 @@ router.post(
 router.post(
   '/verify',
   authenticate,
+  paymentRateLimiter,
   asyncHandler(async (req, res) => {
     const validatedData = verifyPaymentSchema.parse(req.body);
 
