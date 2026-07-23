@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { orderController } from '../controllers';
 import { authenticate } from '../middleware/auth.middleware';
+import { authorize } from '../middleware/authorization.middleware';
 import { validateOrderOwnership, validateOrderCancellation } from '../middleware/ownership.middleware';
 
 const router = Router();
@@ -27,7 +28,7 @@ router.post('/', orderController.createOrder);
  * @desc    Get all orders (admin/staff only)
  * @access  Private (Admin/Staff)
  */
-router.get('/', orderController.getAllOrders);
+router.get('/', authorize('ADMIN', 'STAFF', 'OWNER'), orderController.getAllOrders);
 
 /**
  * @route   GET /api/orders/my-orders
@@ -48,14 +49,14 @@ router.get('/:id', validateOrderOwnership, orderController.getOrderById);
  * @desc    Update order status (admin/staff only)
  * @access  Private (Admin/Staff)
  */
-router.patch('/:id/status', orderController.updateOrderStatus);
+router.patch('/:id/status', authorize('ADMIN', 'STAFF', 'OWNER'), orderController.updateOrderStatus);
 
 /**
  * @route   PATCH /api/orders/:id/payment
  * @desc    Update payment status (admin/staff only)
  * @access  Private (Admin/Staff)
  */
-router.patch('/:id/payment', orderController.updatePaymentStatus);
+router.patch('/:id/payment', authorize('ADMIN', 'STAFF', 'OWNER'), orderController.updatePaymentStatus);
 
 /**
  * @route   DELETE /api/orders/:id

@@ -38,8 +38,17 @@ export const createApp = (): Application => {
     })
   );
 
-  // Compression
-  app.use(compression());
+  // Compression with optimized settings
+  app.use(compression({
+    filter: (req, res) => {
+      if (req.headers['x-no-compression']) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+    threshold: 1024, // Only compress responses larger than 1KB
+    level: 6, // Balance between compression ratio and CPU usage
+  }));
 
   // Body parsing
   app.use(express.json());

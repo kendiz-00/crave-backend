@@ -173,8 +173,27 @@ export class OrderService {
 
   /**
    * Validate cart items before checkout
+   * Optimized to avoid N+1 queries
    */
-  private async validateCartItems(items: any[]) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  private async validateCartItems(items: { menuItemId: string; quantity: number; addOns?: { addOnId: string }[] }[]) {
+    // Collect all unique menu item IDs and add-on IDs
+    const menuItemIds = [...new Set(items.map((item) => item.menuItemId))];
+    const addOnIds = [...new Set(items.flatMap((item) => item.addOns?.map((a) => a.addOnId) || []))];
+
+    // Fetch all menu items and add-ons in parallel
+    const [menuItems, addOns] = await Promise.all([
+      prisma.menuItem.findMany({
+        where: { id: { in: menuItemIds } },
+      }),
+      addOnIds.length > 0 ? prisma.addOn.findMany({
+        where: { id: { in: addOnIds } },
+      }) : [],
+    ]);
+
+    // Create maps for O(1) lookup
+    const menuItemMap = new Map(menuItems.map(item => [item.id, item]));
+    const addOnMap = new Map(addOns.map(addOn => [addOn.id, addOn]));
+
     for (const item of items) {
       // Validate quantity
       if (item.quantity <= 0) {
@@ -182,32 +201,30 @@ export class OrderService {
       }
 
       // Check if menu item exists and is available
-      const menuItem = await prisma.menuItem.findUnique({
-        where: { id: item.menuItemId },
-      });
+      const menuItem = menuItemMap.get(item.menuItemId);
 
       if (!menuItem) {
-        throw new ApiError(400, `Menu item ${item.menuItem.name} no longer exists`);
+        throw new ApiError(400, `Menu item no longer exists`);
       }
 
       if (!menuItem.isAvailable) {
-        throw new ApiError(400, `Menu item ${item.menuItem.name} is currently unavailable`);
+        throw new ApiError(400, `Menu item ${menuItem.name} is currently unavailable`);
       }
 
       // Validate add-ons
       if (item.addOns && item.addOns.length > 0) {
-        const addOnIds = item.addOns.map((a: any) => a.addOnId);
-        const validAddOns = await prisma.addOn.findMany({
-          where: { id: { in: addOnIds } },
-        });
+        const itemAddOnIds = item.addOns.map((a: { addOnId: string }) => a.addOnId);
 
-        if (validAddOns.length !== addOnIds.length) {
-          throw new ApiError(400, 'One or more add-ons are invalid or no longer available');
+        // Check if all add-ons exist
+        for (const addOnId of itemAddOnIds) {
+          if (!addOnMap.has(addOnId)) {
+            throw new ApiError(400, 'One or more add-ons are invalid or no longer available');
+          }
         }
 
         // Check for duplicate add-ons
-        const uniqueAddOnIds = new Set(addOnIds);
-        if (uniqueAddOnIds.size !== addOnIds.length) {
+        const uniqueAddOnIds = new Set(itemAddOnIds);
+        if (uniqueAddOnIds.size !== itemAddOnIds.length) {
           throw new ApiError(400, 'Duplicate add-ons detected');
         }
       }
@@ -216,32 +233,46 @@ export class OrderService {
 
   /**
    * Calculate cart total from items (backend recalculation)
+   * Optimized to avoid N+1 queries
    */
-  private async calculateCartTotalFromItems(items: any[]) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  private async calculateCartTotalFromItems(items: { menuItemId: string; quantity: number; addOns?: { addOnId: string }[] }[]) {
     let subtotal = 0;
 
+    // Collect all unique menu item IDs and add-on IDs
+    const menuItemIds = [...new Set(items.map((item) => item.menuItemId))];
+    const addOnIds = [...new Set(items.flatMap((item) => item.addOns?.map((a) => a.addOnId) || []))];
+
+    // Fetch all menu items and add-ons in a single query each
+    const [menuItems, addOns] = await Promise.all([
+      prisma.menuItem.findMany({
+        where: { id: { in: menuItemIds } },
+      }),
+      addOnIds.length > 0 ? prisma.addOn.findMany({
+        where: { id: { in: addOnIds } },
+      }) : [],
+    ]);
+
+    // Create maps for O(1) lookup
+    const menuItemMap = new Map(menuItems.map(item => [item.id, item]));
+    const addOnMap = new Map(addOns.map(addOn => [addOn.id, addOn]));
+
     for (const item of items) {
-      // Get fresh menu item data from database
-      const menuItem = await prisma.menuItem.findUnique({
-        where: { id: item.menuItemId },
-      });
+      const menuItem = menuItemMap.get(item.menuItemId);
 
       if (!menuItem) {
         throw new ApiError(400, `Menu item no longer exists`);
       }
 
-      // Calculate unit price from database (never trust frontend)
       const unitPrice = Number(menuItem.price);
 
-      // Calculate add-ons price from database
       let addOnsPrice = 0;
       if (item.addOns && item.addOns.length > 0) {
-        const addOnIds = item.addOns.map((a: any) => a.addOnId);
-        const addOns = await prisma.addOn.findMany({
-          where: { id: { in: addOnIds } },
-        });
-
-        addOnsPrice = addOns.reduce((sum: number, a: any) => sum + Number(a.price), 0);
+        for (const addOn of item.addOns) {
+          const addOnData = addOnMap.get(addOn.addOnId);
+          if (addOnData) {
+            addOnsPrice += Number(addOnData.price);
+          }
+        }
       }
 
       const itemTotal = (unitPrice + addOnsPrice) * item.quantity;
@@ -368,75 +399,81 @@ export class OrderService {
 
   /**
    * Update order status
+   * Uses transaction to ensure atomic status update
    */
   async updateOrderStatus(orderId: string, data: UpdateOrderStatusInput, userRole: string) {
     if (userRole === 'CUSTOMER') {
       throw new ApiError(403, 'Access denied');
     }
 
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-    });
+    return prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+      });
 
-    if (!order) {
-      throw new ApiError(404, 'Order not found');
-    }
+      if (!order) {
+        throw new ApiError(404, 'Order not found');
+      }
 
-    // Validate status transition
-    const validTransitions: Record<OrderStatus, OrderStatus[]> = {
-      PENDING: ['CONFIRMED', 'CANCELLED'],
-      CONFIRMED: ['PREPARING', 'CANCELLED'],
-      PREPARING: ['READY', 'CANCELLED'],
-      READY: ['OUT_FOR_DELIVERY', 'COMPLETED'],
-      OUT_FOR_DELIVERY: ['COMPLETED'],
-      COMPLETED: ['REFUNDED'],
-      CANCELLED: [],
-      REFUNDED: [],
-    };
+      // Validate status transition
+      const validTransitions: Record<OrderStatus, OrderStatus[]> = {
+        PENDING: ['CONFIRMED', 'CANCELLED'],
+        CONFIRMED: ['PREPARING', 'CANCELLED'],
+        PREPARING: ['READY', 'CANCELLED'],
+        READY: ['OUT_FOR_DELIVERY', 'COMPLETED'],
+        OUT_FOR_DELIVERY: ['COMPLETED'],
+        COMPLETED: ['REFUNDED'],
+        CANCELLED: [],
+        REFUNDED: [],
+      };
 
-    if (!validTransitions[order.status].includes(data.status)) {
-      throw new ApiError(400, `Cannot transition from ${order.status} to ${data.status}`);
-    }
+      if (!validTransitions[order.status].includes(data.status)) {
+        throw new ApiError(400, `Cannot transition from ${order.status} to ${data.status}`);
+      }
 
-    return prisma.order.update({
-      where: { id: orderId },
-      data: { status: data.status },
-      include: {
-        items: {
-          include: {
-            addOns: true,
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: data.status },
+        include: {
+          items: {
+            include: {
+              addOns: true,
+            },
           },
         },
-      },
+      });
     });
   }
 
   /**
    * Update payment status
+   * Uses transaction to ensure atomic payment status update
    */
   async updatePaymentStatus(orderId: string, data: UpdatePaymentStatusInput, userRole: string) {
     if (userRole === 'CUSTOMER') {
       throw new ApiError(403, 'Access denied');
     }
 
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-    });
+    return prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+      });
 
-    if (!order) {
-      throw new ApiError(404, 'Order not found');
-    }
+      if (!order) {
+        throw new ApiError(404, 'Order not found');
+      }
 
-    return prisma.order.update({
-      where: { id: orderId },
-      data: { paymentStatus: data.paymentStatus },
-      include: {
-        items: {
-          include: {
-            addOns: true,
+      return tx.order.update({
+        where: { id: orderId },
+        data: { paymentStatus: data.paymentStatus },
+        include: {
+          items: {
+            include: {
+              addOns: true,
+            },
           },
         },
-      },
+      });
     });
   }
 

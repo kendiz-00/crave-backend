@@ -4,68 +4,106 @@ import type { MenuItemInput, UpdateMenuItemInput, MenuQueryInput } from '@/valid
 
 export class MenuService {
   // Create a new menu item
+  // Uses transaction for atomic creation with validation
   static async createMenuItem(data: MenuItemInput) {
     const { addOns, images, ...menuItemData } = data;
 
-    // Check if category exists
-    const category = await prisma.category.findUnique({
-      where: { id: menuItemData.categoryId },
+    return prisma.$transaction(async (tx) => {
+      // Check if category exists
+      const category = await tx.category.findUnique({
+        where: { id: menuItemData.categoryId },
+      });
+
+      if (!category) {
+        throw new ApiError(HttpStatus.NOT_FOUND, 'Category not found');
+      }
+
+      // Check if slug already exists
+      const existingSlug = await tx.menuItem.findUnique({
+        where: { slug: menuItemData.slug },
+      });
+
+      if (existingSlug) {
+        throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
+      }
+
+      // Create menu item with add-ons and images
+      const menuItem = await tx.menuItem.create({
+        data: {
+          ...menuItemData,
+          addOns: addOns
+            ? {
+                create: addOns.map((addOn) => ({
+                  name: addOn.name,
+                  price: addOn.price,
+                  isRequired: addOn.isRequired || false,
+                  maxSelections: addOn.maxSelections || 1,
+                })),
+              }
+            : undefined,
+          images: images
+            ? {
+                create: images.map((image) => ({
+                  imageUrl: image.imageUrl,
+                  sortOrder: image.sortOrder || 0,
+                })),
+              }
+            : undefined,
+        },
+        include: {
+          category: true,
+          addOns: true,
+          images: true,
+        },
+      });
+
+      return menuItem;
     });
-
-    if (!category) {
-      throw new ApiError(HttpStatus.NOT_FOUND, 'Category not found');
-    }
-
-    // Check if slug already exists
-    const existingSlug = await prisma.menuItem.findUnique({
-      where: { slug: menuItemData.slug },
-    });
-
-    if (existingSlug) {
-      throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
-    }
-
-    // Create menu item with add-ons and images
-    const menuItem = await prisma.menuItem.create({
-      data: {
-        ...menuItemData,
-        addOns: addOns
-          ? {
-              create: addOns.map((addOn) => ({
-                name: addOn.name,
-                price: addOn.price,
-                isRequired: addOn.isRequired || false,
-                maxSelections: addOn.maxSelections || 1,
-              })),
-            }
-          : undefined,
-        images: images
-          ? {
-              create: images.map((image) => ({
-                imageUrl: image.imageUrl,
-                sortOrder: image.sortOrder || 0,
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        category: true,
-        addOns: true,
-        images: true,
-      },
-    });
-
-    return menuItem;
   }
 
   // Get menu item by ID
   static async getMenuItemById(id: string) {
     const menuItem = await prisma.menuItem.findUnique({
       where: { id },
-      include: {
-        category: true,
-        addOns: true,
-        images: true,
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        slug: true,
+        description: true,
+        price: true,
+        imageUrl: true,
+        preparationTime: true,
+        calories: true,
+        categoryId: true,
+        isAvailable: true,
+        isFeatured: true,
+        isDeleted: true,
+        sortOrder: true,
+        displayOrder: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        addOns: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            isRequired: true,
+            maxSelections: true,
+          },
+        },
+        images: {
+          select: {
+            id: true,
+            imageUrl: true,
+            sortOrder: true,
+          },
+        },
       },
     });
 
@@ -84,10 +122,45 @@ export class MenuService {
   static async getMenuItemBySlug(slug: string) {
     const menuItem = await prisma.menuItem.findUnique({
       where: { slug },
-      include: {
-        category: true,
-        addOns: true,
-        images: true,
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        slug: true,
+        description: true,
+        price: true,
+        imageUrl: true,
+        preparationTime: true,
+        calories: true,
+        categoryId: true,
+        isAvailable: true,
+        isFeatured: true,
+        isDeleted: true,
+        sortOrder: true,
+        displayOrder: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        addOns: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            isRequired: true,
+            maxSelections: true,
+          },
+        },
+        images: {
+          select: {
+            id: true,
+            imageUrl: true,
+            sortOrder: true,
+          },
+        },
       },
     });
 
@@ -103,67 +176,70 @@ export class MenuService {
   }
 
   // Update menu item
+  // Uses transaction for atomic update of menu item, add-ons, and images
   static async updateMenuItem(id: string, data: UpdateMenuItemInput) {
     const { addOns, images, ...menuItemData } = data;
 
-    // Check if menu item exists
-    const existingItem = await prisma.menuItem.findUnique({
-      where: { id },
-    });
-
-    if (!existingItem) {
-      throw new ApiError(HttpStatus.NOT_FOUND, 'Menu item not found');
-    }
-
-    if (existingItem.isDeleted) {
-      throw new ApiError(HttpStatus.NOT_FOUND, 'Cannot update deleted menu item');
-    }
-
-    // Check if slug is being changed and if new slug already exists
-    if (menuItemData.slug && menuItemData.slug !== existingItem.slug) {
-      const existingSlug = await prisma.menuItem.findUnique({
-        where: { slug: menuItemData.slug },
+    return prisma.$transaction(async (tx) => {
+      // Check if menu item exists
+      const existingItem = await tx.menuItem.findUnique({
+        where: { id },
       });
 
-      if (existingSlug) {
-        throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
+      if (!existingItem) {
+        throw new ApiError(HttpStatus.NOT_FOUND, 'Menu item not found');
       }
-    }
 
-    // Update menu item
-    const menuItem = await prisma.menuItem.update({
-      where: { id },
-      data: {
-        ...menuItemData,
-        addOns: addOns
-          ? {
-              deleteMany: {},
-              create: addOns.map((addOn) => ({
-                name: addOn.name,
-                price: addOn.price,
-                isRequired: addOn.isRequired || false,
-                maxSelections: addOn.maxSelections || 1,
-              })),
-            }
-          : undefined,
-        images: images
-          ? {
-              deleteMany: {},
-              create: images.map((image) => ({
-                imageUrl: image.imageUrl,
-                sortOrder: image.sortOrder || 0,
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        category: true,
-        addOns: true,
-        images: true,
-      },
+      if (existingItem.isDeleted) {
+        throw new ApiError(HttpStatus.NOT_FOUND, 'Cannot update deleted menu item');
+      }
+
+      // Check if slug is being changed and if new slug already exists
+      if (menuItemData.slug && menuItemData.slug !== existingItem.slug) {
+        const existingSlug = await tx.menuItem.findUnique({
+          where: { slug: menuItemData.slug },
+        });
+
+        if (existingSlug) {
+          throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
+        }
+      }
+
+      // Update menu item
+      const menuItem = await tx.menuItem.update({
+        where: { id },
+        data: {
+          ...menuItemData,
+          addOns: addOns
+            ? {
+                deleteMany: {},
+                create: addOns.map((addOn) => ({
+                  name: addOn.name,
+                  price: addOn.price,
+                  isRequired: addOn.isRequired || false,
+                  maxSelections: addOn.maxSelections || 1,
+                })),
+              }
+            : undefined,
+          images: images
+            ? {
+                deleteMany: {},
+                create: images.map((image) => ({
+                  imageUrl: image.imageUrl,
+                  sortOrder: image.sortOrder || 0,
+                })),
+              }
+            : undefined,
+        },
+        include: {
+          category: true,
+          addOns: true,
+          images: true,
+        },
+      });
+
+      return menuItem;
     });
-
-    return menuItem;
   }
 
   // Soft delete menu item
@@ -206,6 +282,17 @@ export class MenuService {
 
       if (categoryRecord) {
         where.categoryId = categoryRecord.id;
+      } else {
+        // If category doesn't exist, return empty results
+        return {
+          data: [],
+          pagination: {
+            page,
+            limit,
+            total: 0,
+            totalPages: 0,
+          },
+        };
       }
     }
 
@@ -245,21 +332,56 @@ export class MenuService {
         break;
     }
 
-    // Get total count
-    const total = await prisma.menuItem.count({ where });
-
-    // Get menu items
-    const menuItems = await prisma.menuItem.findMany({
-      where,
-      orderBy,
-      skip,
-      take: limit,
-      include: {
-        category: true,
-        addOns: true,
-        images: true,
-      },
-    });
+    // Get total count and menu items in parallel
+    const [menuItems, total] = await Promise.all([
+      prisma.menuItem.findMany({
+        where,
+        orderBy,
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          slug: true,
+          description: true,
+          price: true,
+          imageUrl: true,
+          preparationTime: true,
+          calories: true,
+          categoryId: true,
+          isAvailable: true,
+          isFeatured: true,
+          isDeleted: true,
+          sortOrder: true,
+          displayOrder: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          addOns: {
+            select: {
+              id: true,
+              name: true,
+              price: true,
+              isRequired: true,
+              maxSelections: true,
+            },
+          },
+          images: {
+            select: {
+              id: true,
+              imageUrl: true,
+              sortOrder: true,
+            },
+          },
+        },
+      }),
+      prisma.menuItem.count({ where }),
+    ]);
 
     return {
       data: menuItems,
@@ -282,10 +404,44 @@ export class MenuService {
       },
       take: limit,
       orderBy: { sortOrder: 'asc' },
-      include: {
-        category: true,
-        addOns: true,
-        images: true,
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        slug: true,
+        description: true,
+        price: true,
+        imageUrl: true,
+        preparationTime: true,
+        calories: true,
+        categoryId: true,
+        isAvailable: true,
+        isFeatured: true,
+        sortOrder: true,
+        displayOrder: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        addOns: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            isRequired: true,
+            maxSelections: true,
+          },
+        },
+        images: {
+          select: {
+            id: true,
+            imageUrl: true,
+            sortOrder: true,
+          },
+        },
       },
     });
 
@@ -314,10 +470,45 @@ export class MenuService {
         skip,
         take: limit,
         orderBy: { sortOrder: 'asc' },
-        include: {
-          category: true,
-          addOns: true,
-          images: true,
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          slug: true,
+          description: true,
+          price: true,
+          imageUrl: true,
+          preparationTime: true,
+          calories: true,
+          categoryId: true,
+          isAvailable: true,
+          isFeatured: true,
+          isDeleted: true,
+          sortOrder: true,
+          displayOrder: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          addOns: {
+            select: {
+              id: true,
+              name: true,
+              price: true,
+              isRequired: true,
+              maxSelections: true,
+            },
+          },
+          images: {
+            select: {
+              id: true,
+              imageUrl: true,
+              sortOrder: true,
+            },
+          },
         },
       }),
       prisma.menuItem.count({

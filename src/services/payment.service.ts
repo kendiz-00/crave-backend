@@ -1,7 +1,6 @@
-import { PrismaClient, PaymentMethod, PaymentGateway, PaymentStatus } from '@prisma/client';
+import { PaymentMethod, PaymentGateway, PaymentStatus } from '@prisma/client';
 import { ApiError } from '../types/errors';
-
-const prisma = new PrismaClient();
+import prisma from '@/database';
 
 export class PaymentService {
   /**
@@ -61,70 +60,73 @@ export class PaymentService {
 
   /**
    * Verify payment with Paystack
+   * Uses transaction to prevent race conditions and duplicate payments
    */
   async verifyPayment(reference: string) {
-    // Fetch payment from database
-    const payment = await prisma.payment.findUnique({
-      where: { reference },
-      include: { order: true },
+    // Use transaction to prevent race conditions
+    return prisma.$transaction(async (tx) => {
+      // Fetch payment from database with lock
+      const payment = await tx.payment.findUnique({
+        where: { reference },
+        include: { order: true },
+      });
+
+      if (!payment) {
+        throw new ApiError(404, 'Payment not found');
+      }
+
+      // If already verified, return existing payment (idempotent)
+      if (payment.status === PaymentStatus.PAID) {
+        return payment;
+      }
+
+      // Verify with Paystack API
+      const verification = await this.verifyWithPaystack(reference);
+
+      if (!verification) {
+        throw new ApiError(400, 'Payment verification failed');
+      }
+
+      // Update payment status and order payment status atomically
+      const updatedPayment = await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentStatus.PAID,
+          gatewayResponse: verification,
+          verifiedAt: new Date(),
+        },
+      });
+
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: {
+          paymentStatus: PaymentStatus.PAID,
+          status: 'CONFIRMED',
+        },
+      });
+
+      return updatedPayment;
     });
-
-    if (!payment) {
-      throw new ApiError(404, 'Payment not found');
-    }
-
-    // If already verified, return existing payment
-    if (payment.status === PaymentStatus.PAID) {
-      return payment;
-    }
-
-    // Verify with Paystack API
-    const verification = await this.verifyWithPaystack(reference);
-
-    if (!verification.status) {
-      throw new ApiError(400, 'Payment verification failed');
-    }
-
-    // Update payment status
-    const updatedPayment = await prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: PaymentStatus.PAID,
-        gatewayResponse: verification,
-        verifiedAt: new Date(),
-      },
-    });
-
-    // Update order payment status
-    await prisma.order.update({
-      where: { id: payment.orderId },
-      data: {
-        paymentStatus: PaymentStatus.PAID,
-        status: 'CONFIRMED',
-      },
-    });
-
-    return updatedPayment;
   }
 
   /**
    * Handle payment webhook from Paystack
    */
-  async handleWebhook(event: any) {
+  async handleWebhook(event: { event: string; data: unknown }) {
     const { event: eventType, data } = event;
 
     switch (eventType) {
       case 'charge.success':
-        await this.handleSuccessfulCharge(data);
+        await this.handleSuccessfulCharge(data as { reference: string });
         break;
       case 'charge.failed':
-        await this.handleFailedCharge(data);
+        await this.handleFailedCharge(data as { reference: string });
         break;
       case 'transfer.success':
-        await this.handleSuccessfulTransfer(data);
+        await this.handleSuccessfulTransfer(data as unknown);
         break;
       case 'transfer.failed':
-        await this.handleFailedTransfer(data);
+        await this.handleFailedTransfer(data as unknown);
         break;
       default:
         console.log(`Unhandled webhook event: ${eventType}`);
@@ -133,71 +135,76 @@ export class PaymentService {
 
   /**
    * Handle successful charge
+   * Uses transaction to ensure atomic payment and order status updates
    */
-  private async handleSuccessfulCharge(data: any) {
+  private async handleSuccessfulCharge(data: { reference: string }) {
     const { reference } = data;
 
-    const payment = await prisma.payment.findUnique({
-      where: { reference },
-      include: { order: true },
-    });
+    return prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findUnique({
+        where: { reference },
+        include: { order: true },
+      });
 
-    if (!payment) {
-      console.error(`Payment not found for reference: ${reference}`);
-      return;
-    }
+      if (!payment) {
+        console.error(`Payment not found for reference: ${reference}`);
+        return;
+      }
 
-    if (payment.status === PaymentStatus.PAID) {
-      return; // Already processed
-    }
+      if (payment.status === PaymentStatus.PAID) {
+        return; // Already processed (idempotent)
+      }
 
-    await prisma.$transaction([
-      prisma.payment.update({
+      await tx.payment.update({
         where: { id: payment.id },
         data: {
           status: PaymentStatus.PAID,
           gatewayResponse: data,
           verifiedAt: new Date(),
         },
-      }),
-      prisma.order.update({
+      });
+
+      await tx.order.update({
         where: { id: payment.orderId },
         data: {
           paymentStatus: PaymentStatus.PAID,
           status: 'CONFIRMED',
         },
-      }),
-    ]);
+      });
+    });
   }
 
   /**
    * Handle failed charge
+   * Uses transaction for atomic payment status update
    */
-  private async handleFailedCharge(data: any) {
+  private async handleFailedCharge(data: { reference: string }) {
     const { reference } = data;
 
-    const payment = await prisma.payment.findUnique({
-      where: { reference },
-    });
+    return prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findUnique({
+        where: { reference },
+      });
 
-    if (!payment) {
-      console.error(`Payment not found for reference: ${reference}`);
-      return;
-    }
+      if (!payment) {
+        console.error(`Payment not found for reference: ${reference}`);
+        return;
+      }
 
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: PaymentStatus.FAILED,
-        gatewayResponse: data,
-      },
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentStatus.FAILED,
+          gatewayResponse: data,
+        },
+      });
     });
   }
 
   /**
    * Handle successful transfer (for refunds)
    */
-  private async handleSuccessfulTransfer(data: any) {
+  private async handleSuccessfulTransfer(data: unknown) {
     // Implement refund handling if needed
     console.log('Transfer successful:', data);
   }
@@ -205,7 +212,7 @@ export class PaymentService {
   /**
    * Handle failed transfer
    */
-  private async handleFailedTransfer(data: any) {
+  private async handleFailedTransfer(data: unknown) {
     // Implement failed refund handling if needed
     console.log('Transfer failed:', data);
   }
@@ -227,7 +234,7 @@ export class PaymentService {
       },
     });
 
-    const data = await response.json() as any;
+    const data = await response.json() as { status: boolean; message?: string; data: unknown };
 
     if (!data.status) {
       throw new ApiError(400, data.message || 'Payment verification failed');
@@ -290,46 +297,49 @@ export class PaymentService {
 
   /**
    * Refund payment
+   * Uses transaction to ensure atomic updates to payment and order status
    */
   async refundPayment(paymentId: string, reason?: string) {
-    const payment = await prisma.payment.findUnique({
-      where: { id: paymentId },
-    });
+    return prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findUnique({
+        where: { id: paymentId },
+      });
 
-    if (!payment) {
-      throw new ApiError(404, 'Payment not found');
-    }
+      if (!payment) {
+        throw new ApiError(404, 'Payment not found');
+      }
 
-    if (payment.status !== PaymentStatus.PAID) {
-      throw new ApiError(400, 'Payment cannot be refunded');
-    }
+      if (payment.status !== PaymentStatus.PAID) {
+        throw new ApiError(400, 'Payment cannot be refunded');
+      }
 
-    // Initiate refund with Paystack
-    const refund = await this.initiateRefund(payment.reference, Number(payment.amount), reason);
+      // Initiate refund with Paystack
+      const refund = await this.initiateRefund(payment.reference, Number(payment.amount), reason);
 
-    // Update payment status
-    await prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: PaymentStatus.REFUNDED,
-        gatewayResponse: refund,
-        metadata: {
-          ...(payment.metadata as any),
-          refundReason: reason,
+      // Update payment status
+      await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: PaymentStatus.REFUNDED,
+          gatewayResponse: JSON.parse(JSON.stringify(refund)),
+          metadata: {
+            ...(payment.metadata as Record<string, unknown>),
+            refundReason: reason,
+          },
         },
-      },
-    });
+      });
 
-    // Update order status
-    await prisma.order.update({
-      where: { id: payment.orderId },
-      data: {
-        paymentStatus: PaymentStatus.REFUNDED,
-        status: 'REFUNDED',
-      },
-    });
+      // Update order status
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: {
+          paymentStatus: PaymentStatus.REFUNDED,
+          status: 'REFUNDED',
+        },
+      });
 
-    return refund;
+      return refund;
+    });
   }
 
   /**
@@ -355,7 +365,7 @@ export class PaymentService {
       }),
     });
 
-    const data = await response.json() as any;
+    const data = await response.json() as { status: boolean; message?: string; data: unknown };
 
     if (!data.status) {
       throw new ApiError(400, data.message || 'Refund initiation failed');

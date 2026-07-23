@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/database';
 import { ApiError } from '../types/errors';
-
-const prisma = new PrismaClient();
 
 /**
  * Middleware to validate cart ownership

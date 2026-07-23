@@ -30,12 +30,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  addresses         Address[]
-  refreshTokens     RefreshToken[]
-  carts             Cart[]
-  orders            Order[]
+  addresses          Address[]
+  refreshTokens      RefreshToken[]
+  carts              Cart[]
+  orders             Order[]
   rewardTransactions RewardTransaction[]
-  rewardCodes       RewardCode[]
+  rewardCodes        RewardCode[]
 
   @@index([email])
   @@index([phone])
@@ -54,24 +54,26 @@ model Address {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields:[userId], references:[id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
 // RefreshToken model for JWT refresh tokens
 model RefreshToken {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  token     String   @unique
+  token     String    @unique
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   revokedAt DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([token])
+  @@index([expiresAt]) // For cleaning up expired tokens
+  @@index([revokedAt]) // For tracking revoked tokens
 }
 
 // Enum for user roles
@@ -110,7 +112,7 @@ model MenuItem {
   price           Decimal  @db.Decimal(10, 2)
   costPrice       Decimal? @db.Decimal(10, 2)
   imageUrl        String
-  preparationTime Int      // in minutes
+  preparationTime Int // in minutes
   calories        Int?
   categoryId      String
   isAvailable     Boolean  @default(true)
@@ -121,7 +123,7 @@ model MenuItem {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  category   Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   addOns     AddOn[]
   images     MenuImage[]
   cartItems  CartItem[]
@@ -134,6 +136,8 @@ model MenuItem {
   @@index([isFeatured])
   @@index([isDeleted])
   @@index([displayOrder])
+  @@index([categoryId, isAvailable]) // Composite index for available items by category
+  @@index([isFeatured, isAvailable]) // Composite index for featured available items
 }
 
 // AddOn model for menu item add-ons
@@ -154,12 +158,12 @@ model AddOn {
 
 // MenuImage model for multiple images per menu item
 model MenuImage {
-  id        String   @id @default(uuid())
+  id         String   @id @default(uuid())
   menuItemId String
-  imageUrl  String
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  imageUrl   String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
 
@@ -181,11 +185,12 @@ model Cart {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   items CartItem[]
 
   @@index([userId])
   @@index([status])
+  @@index([userId, status]) // Composite index for fetching active carts by user
 }
 
 // CartItem model for items in cart
@@ -199,8 +204,8 @@ model CartItem {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  cart     Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  cart     Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  menuItem MenuItem        @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
   addOns   CartItemAddOn[]
 
   @@index([cartId])
@@ -275,33 +280,36 @@ model Order {
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items            OrderItem[]
-  transactions     RewardTransaction[]
-  payments         Payment[]
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items        OrderItem[]
+  transactions RewardTransaction[]
+  payments     Payment[]
 
   @@index([userId])
   @@index([orderNumber])
   @@index([status])
   @@index([paymentStatus])
   @@index([createdAt])
+  @@index([status, createdAt]) // Composite index for order filtering by status and date
+  @@index([userId, createdAt]) // Composite index for user order history
+  @@index([userId, status]) // Composite index for user orders by status
 }
 
 // OrderItem model for items in an order
 model OrderItem {
-  id           String   @id @default(uuid())
-  orderId      String
-  menuItemId   String
-  quantity     Int
-  snapshotName String
+  id            String   @id @default(uuid())
+  orderId       String
+  menuItemId    String
+  quantity      Int
+  snapshotName  String
   snapshotPrice Decimal  @db.Decimal(10, 2)
   snapshotImage String
   snapshotSku   String?
-  subtotal     Decimal  @db.Decimal(10, 2)
-  createdAt    DateTime @default(now())
+  subtotal      Decimal  @db.Decimal(10, 2)
+  createdAt     DateTime @default(now())
 
-  order    Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menuItem MenuItem?    @relation(fields: [menuItemId], references: [id])
+  order    Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem?        @relation(fields: [menuItemId], references: [id])
   addOns   OrderItemAddOn[]
 
   @@index([orderId])
@@ -310,11 +318,11 @@ model OrderItem {
 
 // OrderItemAddOn model for add-ons in order items
 model OrderItemAddOn {
-  id         String   @id @default(uuid())
-  orderItemId String
-  name       String
-  snapshotPrice Decimal @db.Decimal(10, 2)
-  createdAt  DateTime @default(now())
+  id            String   @id @default(uuid())
+  orderItemId   String
+  name          String
+  snapshotPrice Decimal  @db.Decimal(10, 2)
+  createdAt     DateTime @default(now())
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 
@@ -331,14 +339,14 @@ enum RewardTransactionType {
 
 // RewardTransaction model for tracking reward points
 model RewardTransaction {
-  id             String               @id @default(uuid())
+  id             String                @id @default(uuid())
   userId         String
   orderId        String?
   type           RewardTransactionType
   points         Int
   runningBalance Int
   reason         String
-  createdAt      DateTime             @default(now())
+  createdAt      DateTime              @default(now())
 
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
@@ -358,18 +366,18 @@ enum RewardCodeStatus {
 
 // RewardCode model for generated reward codes
 model RewardCode {
-  id           String           @id @default(uuid())
-  userId       String
-  code         String           @unique
-  reward       String
-  generatedAt  DateTime         @default(now())
-  expiresAt    DateTime
-  redeemedAt   DateTime?
-  redeemedBy   String?
-  orderId      String?
-  status       RewardCodeStatus @default(GENERATED)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  id          String           @id @default(uuid())
+  userId      String
+  code        String           @unique
+  reward      String
+  generatedAt DateTime         @default(now())
+  expiresAt   DateTime
+  redeemedAt  DateTime?
+  redeemedBy  String?
+  orderId     String?
+  status      RewardCodeStatus @default(GENERATED)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -404,7 +412,7 @@ model Payment {
   amount          Decimal        @db.Decimal(10, 2)
   currency        String         @default("GHS")
   method          PaymentMethod
-  gateway         PaymentGateway  @default(PAYSTACK)
+  gateway         PaymentGateway @default(PAYSTACK)
   status          PaymentStatus  @default(PENDING)
   gatewayResponse Json?
   metadata        Json?
@@ -418,4 +426,5 @@ model Payment {
   @@index([reference])
   @@index([status])
   @@index([createdAt])
+  @@index([status, createdAt]) // Composite index for payment filtering by status and date
 }

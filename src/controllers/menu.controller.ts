@@ -69,7 +69,7 @@ export const getMenuItemsController = asyncHandler(async (req: Request, res: Res
 });
 
 export const getFeaturedMenuItemsController = asyncHandler(async (req: Request, res: Response) => {
-  const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10));
   const menuItems = await MenuService.getFeaturedMenuItems(limit);
 
   res.status(HttpStatus.OK).json({
@@ -80,8 +80,8 @@ export const getFeaturedMenuItemsController = asyncHandler(async (req: Request, 
 
 export const getMenuItemsByCategoryController = asyncHandler(async (req: Request, res: Response) => {
   const { slug } = req.params;
-  const page = req.query.page ? parseInt(req.query.page as string) : 1;
-  const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+  const page = Math.max(1, parseInt(req.query.page as string) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
   const result = await MenuService.getMenuItemsByCategorySlug(slug, page, limit);
 
   res.status(HttpStatus.OK).json({

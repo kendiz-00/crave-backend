@@ -4,21 +4,24 @@ import type { CategoryInput, UpdateCategoryInput } from '@/validators';
 
 export class CategoryService {
   // Create a new category
+  // Uses transaction for atomic creation with slug validation
   static async createCategory(data: CategoryInput) {
-    // Check if slug already exists
-    const existingSlug = await prisma.category.findUnique({
-      where: { slug: data.slug },
+    return prisma.$transaction(async (tx) => {
+      // Check if slug already exists
+      const existingSlug = await tx.category.findUnique({
+        where: { slug: data.slug },
+      });
+
+      if (existingSlug) {
+        throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
+      }
+
+      const category = await tx.category.create({
+        data,
+      });
+
+      return category;
     });
-
-    if (existingSlug) {
-      throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
-    }
-
-    const category = await prisma.category.create({
-      data,
-    });
-
-    return category;
   }
 
   // Get all categories
@@ -96,33 +99,36 @@ export class CategoryService {
   }
 
   // Update category
+  // Uses transaction for atomic update with slug validation
   static async updateCategory(id: string, data: UpdateCategoryInput) {
-    // Check if category exists
-    const existingCategory = await prisma.category.findUnique({
-      where: { id },
-    });
-
-    if (!existingCategory) {
-      throw new ApiError(HttpStatus.NOT_FOUND, 'Category not found');
-    }
-
-    // Check if slug is being changed and if new slug already exists
-    if (data.slug && data.slug !== existingCategory.slug) {
-      const existingSlug = await prisma.category.findUnique({
-        where: { slug: data.slug },
+    return prisma.$transaction(async (tx) => {
+      // Check if category exists
+      const existingCategory = await tx.category.findUnique({
+        where: { id },
       });
 
-      if (existingSlug) {
-        throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
+      if (!existingCategory) {
+        throw new ApiError(HttpStatus.NOT_FOUND, 'Category not found');
       }
-    }
 
-    const category = await prisma.category.update({
-      where: { id },
-      data,
+      // Check if slug is being changed and if new slug already exists
+      if (data.slug && data.slug !== existingCategory.slug) {
+        const existingSlug = await tx.category.findUnique({
+          where: { slug: data.slug },
+        });
+
+        if (existingSlug) {
+          throw new ApiError(HttpStatus.CONFLICT, 'Slug already exists');
+        }
+      }
+
+      const category = await tx.category.update({
+        where: { id },
+        data,
+      });
+
+      return category;
     });
-
-    return category;
   }
 
   // Delete category (soft delete by setting isActive to false)

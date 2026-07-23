@@ -32,6 +32,11 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipFailedRequests: false,
+  keyGenerator: (req) => {
+    // Rate limit by IP and email for login attempts
+    const email = req.body?.email || req.ip;
+    return `${req.ip}-${email}`;
+  },
 });
 
 /**

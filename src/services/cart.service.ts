@@ -56,23 +56,82 @@ export class CartService {
 
   /**
    * Create or update cart with items
+   * Optimized to use transaction and batch operations
    */
   async createCart(userId: string, data: CreateCartInput) {
-    // Get or create active cart
-    const cart = await this.getActiveCart(userId);
+    return prisma.$transaction(async (tx) => {
+      // Get or create active cart
+      const cart = await this.getActiveCart(userId);
 
-    // Clear existing items
-    await prisma.cartItem.deleteMany({
-      where: { cartId: cart.id },
+      // Clear existing items
+      await tx.cartItem.deleteMany({
+        where: { cartId: cart.id },
+      });
+
+      // Add new items in batch
+      for (const item of data.items) {
+        await this.addCartItemInternal(tx, cart.id, item);
+      }
+
+      // Return updated cart
+      return this.getActiveCart(userId);
+    });
+  }
+
+  /**
+   * Internal method to add cart item with transaction client
+   */
+  private async addCartItemInternal(tx: any, cartId: string, item: CartItemInput) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Validate menu item exists and is available
+    const menuItem = await tx.menuItem.findUnique({
+      where: { id: item.menuItemId },
+      include: { addOns: true },
     });
 
-    // Add new items
-    for (const item of data.items) {
-      await this.addCartItem(cart.id, item);
+    if (!menuItem) {
+      throw new ApiError(404, 'Menu item not found');
     }
 
-    // Return updated cart
-    return this.getActiveCart(userId);
+    if (!menuItem.isAvailable || menuItem.isDeleted) {
+      throw new ApiError(400, 'Menu item is not available');
+    }
+
+    // Validate add-ons and calculate prices from database
+    let addOnsPrice = 0;
+    if (item.addOns && item.addOns.length > 0) {
+      const validAddOnIds = menuItem.addOns.map((a: { id: string }) => a.id);
+      for (const addOn of item.addOns) {
+        if (!validAddOnIds.includes(addOn.addOnId)) {
+          throw new ApiError(400, `Invalid add-on: ${addOn.name}`);
+        }
+        const validAddOn = menuItem.addOns.find((a: { id: string }) => a.id === addOn.addOnId);
+        if (validAddOn) {
+          addOnsPrice += Number(validAddOn.price);
+        }
+      }
+    }
+
+    const unitPrice = Number(menuItem.price);
+    const totalPrice = (unitPrice + addOnsPrice) * item.quantity;
+
+    await tx.cartItem.create({
+      data: {
+        cartId,
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        unitPrice,
+        totalPrice,
+        addOns: item.addOns
+          ? {
+              create: item.addOns.map((a) => ({
+                addOnId: a.addOnId,
+                name: a.name,
+                price: a.price,
+              })),
+            }
+          : undefined,
+      },
+    });
   }
 
   /**
@@ -93,19 +152,24 @@ export class CartService {
       throw new ApiError(400, 'Menu item is not available');
     }
 
-    // Validate add-ons
+    // Validate add-ons and calculate prices from database
+    let addOnsPrice = 0;
     if (item.addOns && item.addOns.length > 0) {
       const validAddOnIds = menuItem.addOns.map((a) => a.id);
       for (const addOn of item.addOns) {
         if (!validAddOnIds.includes(addOn.addOnId)) {
           throw new ApiError(400, `Invalid add-on: ${addOn.name}`);
         }
+        // Get add-on price from database, not frontend
+        const validAddOn = menuItem.addOns.find((a) => a.id === addOn.addOnId);
+        if (validAddOn) {
+          addOnsPrice += Number(validAddOn.price);
+        }
       }
     }
 
     // Calculate prices from database (never trust frontend)
     const unitPrice = Number(menuItem.price);
-    const addOnsPrice = item.addOns?.reduce((sum, a) => sum + Number(a.price), 0) || 0;
     const totalPrice = (unitPrice + addOnsPrice) * item.quantity;
 
     // Create cart item
@@ -163,47 +227,54 @@ export class CartService {
       throw new ApiError(403, 'Access denied');
     }
 
-    // Validate add-ons if provided
+    // Validate add-ons and calculate prices from database
+    let addOnsPrice = 0;
     if (data.addOns) {
       const validAddOnIds = cartItem.menuItem.addOns.map((a) => a.id);
       for (const addOn of data.addOns) {
         if (!validAddOnIds.includes(addOn.addOnId)) {
           throw new ApiError(400, `Invalid add-on: ${addOn.name}`);
         }
+        // Get add-on price from database, not frontend
+        const validAddOn = cartItem.menuItem.addOns.find((a) => a.id === addOn.addOnId);
+        if (validAddOn) {
+          addOnsPrice += Number(validAddOn.price);
+        }
       }
     }
 
-    // Recalculate prices
+    // Recalculate prices from database (never trust frontend)
     const unitPrice = Number(cartItem.menuItem.price);
-    const addOnsPrice = data.addOns?.reduce((sum, a) => sum + Number(a.price), 0) || 0;
     const totalPrice = (unitPrice + addOnsPrice) * data.quantity;
 
-    // Update cart item
-    const updated = await prisma.cartItem.update({
-      where: { id: cartItemId },
-      data: {
-        quantity: data.quantity,
-        totalPrice,
-        addOns: data.addOns
-          ? {
-              deleteMany: {},
-              create: data.addOns.map((a) => ({
-                addOnId: a.addOnId,
-                name: a.name,
-                price: a.price,
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        menuItem: {
-          include: {
-            category: true,
-            addOns: true,
-          },
+    // Update cart item with transaction for atomicity
+    const updated = await prisma.$transaction(async (tx) => {
+      return tx.cartItem.update({
+        where: { id: cartItemId },
+        data: {
+          quantity: data.quantity,
+          totalPrice,
+          addOns: data.addOns
+            ? {
+                deleteMany: {},
+                create: data.addOns.map((a) => ({
+                  addOnId: a.addOnId,
+                  name: a.name,
+                  price: a.price,
+                })),
+              }
+            : undefined,
         },
-        addOns: true,
-      },
+        include: {
+          menuItem: {
+            include: {
+              category: true,
+              addOns: true,
+            },
+          },
+          addOns: true,
+        },
+      });
     });
 
     return updated;

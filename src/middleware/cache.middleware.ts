@@ -5,7 +5,7 @@ import { config } from '@/config';
  * Simple in-memory cache for GET requests
  * Cache duration: 5 minutes by default
  */
-const cache = new Map<string, { data: any; timestamp: number }>();
+const cache = new Map<string, { data: unknown; timestamp: number }>();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
@@ -36,7 +36,7 @@ export const cacheMiddleware = (duration: number = CACHE_DURATION) => {
     const originalJson = res.json.bind(res);
 
     // Override json method to cache response
-    res.json = (data: any) => {
+    res.json = (data: unknown) => {
       cache.set(cacheKey, { data, timestamp: Date.now() });
       return originalJson(data);
     };
@@ -70,7 +70,19 @@ export const cleanExpiredCache = () => {
   }
 };
 
+let cacheCleanupInterval: NodeJS.Timeout | null = null;
+
 // Clean expired cache every 5 minutes
 if (!config.isDevelopment) {
-  setInterval(cleanExpiredCache, 5 * 60 * 1000);
+  cacheCleanupInterval = setInterval(cleanExpiredCache, 5 * 60 * 1000);
 }
+
+/**
+ * Clear cache cleanup interval on shutdown
+ */
+export const stopCacheCleanup = () => {
+  if (cacheCleanupInterval) {
+    clearInterval(cacheCleanupInterval);
+    cacheCleanupInterval = null;
+  }
+};

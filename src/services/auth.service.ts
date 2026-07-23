@@ -34,53 +34,54 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        email,
-        phone,
-        password: hashedPassword,
-        firstName,
-        lastName,
-        role: role || 'CUSTOMER',
-      },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
+    // Create user and refresh token in transaction for atomicity
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          phone,
+          password: hashedPassword,
+          firstName,
+          lastName,
+          role: role || 'CUSTOMER',
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+        },
+      });
 
-    // Generate tokens
-    const payload: TokenPayload = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    };
-
-    const tokens = generateAuthTokens(payload);
-
-    // Store refresh token in database
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
-
-    await prisma.refreshToken.create({
-      data: {
+      // Generate tokens
+      const payload: TokenPayload = {
         userId: user.id,
-        token: tokens.refreshToken,
-        expiresAt,
-      },
+        email: user.email,
+        role: user.role,
+      };
+
+      const tokens = generateAuthTokens(payload);
+
+      // Store refresh token in database
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+
+      await tx.refreshToken.create({
+        data: {
+          userId: user.id,
+          token: tokens.refreshToken,
+          expiresAt,
+        },
+      });
+
+      return { user, tokens };
     });
 
-    return {
-      user,
-      tokens,
-    };
+    return result;
   }
 
   // Login user (email or phone)
@@ -109,34 +110,38 @@ export class AuthService {
       throw new ApiError(HttpStatus.UNAUTHORIZED, 'Invalid credentials');
     }
 
-    // Generate tokens
-    const payload: TokenPayload = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    };
-
-    const tokens = generateAuthTokens(payload);
-
-    // Store refresh token in database
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
-
-    await prisma.refreshToken.create({
-      data: {
+    // Generate tokens and store refresh token in transaction for atomicity
+    const result = await prisma.$transaction(async (tx) => {
+      const payload: TokenPayload = {
         userId: user.id,
-        token: tokens.refreshToken,
-        expiresAt,
-      },
+        email: user.email,
+        role: user.role,
+      };
+
+      const tokens = generateAuthTokens(payload);
+
+      // Store refresh token in database
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+
+      await tx.refreshToken.create({
+        data: {
+          userId: user.id,
+          token: tokens.refreshToken,
+          expiresAt,
+        },
+      });
+
+      // Return user without password
+      const { password: _password, ...userWithoutPassword } = user;
+
+      return {
+        user: userWithoutPassword,
+        tokens,
+      };
     });
 
-    // Return user without password
-    const { password: _password, ...userWithoutPassword } = user;
-
-    return {
-      user: userWithoutPassword,
-      tokens,
-    };
+    return result;
   }
 
   // Logout user (revoke refresh token)

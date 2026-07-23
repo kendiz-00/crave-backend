@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authenticate } from '../middleware/auth.middleware';
+import { requireAdmin } from '../middleware/authorization.middleware';
 import { paymentRateLimiter } from '../middleware/rateLimit.middleware';
 import { paymentService } from '../services/payment.service';
 import { initializePaymentSchema, verifyPaymentSchema, refundPaymentSchema } from '../validators';
@@ -62,11 +63,30 @@ router.post(
 router.post(
   '/webhook',
   asyncHandler(async (req, res) => {
-    // Verify webhook signature (in production)
-    // const signature = req.headers['x-paystack-signature'] as string;
+    // Verify webhook signature
+    const signature = req.headers['x-paystack-signature'] as string;
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
     
-    // For now, process webhook without signature verification
-    // In production, verify the signature with Paystack secret key
+    if (!signature || !secretKey) {
+      res.status(401).json({
+        success: false,
+        message: 'Unauthorized: Missing signature or secret key',
+      });
+      return;
+    }
+    
+    // Calculate HMAC SHA512 hash
+    const crypto = require('crypto');
+    const hash = crypto.createHmac('sha512', secretKey).update(JSON.stringify(req.body)).digest('hex');
+    
+    if (hash !== signature) {
+      res.status(401).json({
+        success: false,
+        message: 'Unauthorized: Invalid signature',
+      });
+      return;
+    }
+    
     await paymentService.handleWebhook(req.body);
 
     res.json({
@@ -147,16 +167,8 @@ router.get(
 router.post(
   '/:id/refund',
   authenticate,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    // Check if user is admin
-    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'OWNER') {
-      res.status(403).json({
-        success: false,
-        message: 'Only admins can process refunds',
-      });
-      return;
-    }
-
     const validatedData = refundPaymentSchema.parse(req.body);
 
     const refund = await paymentService.refundPayment(

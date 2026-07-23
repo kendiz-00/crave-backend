@@ -12,9 +12,10 @@ import { authenticate, requireAdmin } from '@/middleware';
 const router = Router();
 
 // Public GET endpoints
+// More specific routes must come before parameterized routes
 router.get('/', getAllCategoriesController);
-router.get('/:id', getCategoryController);
 router.get('/slug/:slug', getCategoryBySlugController);
+router.get('/:id', getCategoryController);
 
 // Admin/Owner only endpoints
 router.post('/', authenticate, requireAdmin, createCategoryController);

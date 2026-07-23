@@ -12,7 +12,7 @@ export const securityHeaders = (_req: Request, res: Response, next: NextFunction
   // Prevent MIME type sniffing
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
-  // Enable XSS protection
+  // Enable XSS protection (legacy but still useful for older browsers)
   res.setHeader('X-XSS-Protection', '1; mode=block');
 
   // Referrer policy
@@ -32,6 +32,7 @@ export const securityHeaders = (_req: Request, res: Response, next: NextFunction
     "form-action 'self'",
     "frame-ancestors 'none'",
     "block-all-mixed-content",
+    "upgrade-insecure-requests",
   ];
 
   if (config.isDevelopment) {
@@ -45,8 +46,11 @@ export const securityHeaders = (_req: Request, res: Response, next: NextFunction
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   }
 
-  // Permissions Policy
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // Permissions Policy (formerly Feature-Policy)
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+
+  // Remove X-Powered-By header to hide Express
+  res.removeHeader('X-Powered-By');
 
   next();
 };

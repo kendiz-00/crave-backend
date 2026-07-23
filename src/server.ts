@@ -2,6 +2,11 @@ import 'dotenv/config';
 import { createApp } from './app';
 import { config } from '@/config';
 import { connectDatabase, disconnectDatabase } from '@/database';
+import { stopCacheCleanup } from './middleware/cache.middleware';
+import { initSentry } from './utils/sentry';
+
+// Initialize Sentry
+initSentry();
 
 const app = createApp();
 
@@ -20,6 +25,10 @@ const server = app.listen(config.port, async () => {
 
 const gracefulShutdown = async (signal: string): Promise<void> => {
   console.log(`\n${signal} received. Starting graceful shutdown...`);
+  
+  // Stop cache cleanup interval to prevent memory leaks
+  stopCacheCleanup();
+  
   server.close(async () => {
     console.log('HTTP server closed.');
     await disconnectDatabase();

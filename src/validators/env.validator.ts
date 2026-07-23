@@ -24,6 +24,7 @@ const envSchema = z.object({
   CACHE_TTL: z.string().transform((val) => parseInt(val, 10)).default('300000'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   WHATSAPP_NUMBER: z.string().optional(),
+  SENTRY_DSN: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
