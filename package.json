@@ -1,6 +1,6 @@
 {
   "name": "crave-backend",
-  "version": "1.0.0",
+  "version": "1.0.0-rc1",
   "description": "CRAVE Platform Backend - Production Grade Foundation",
   "main": "dist/server.js",
   "scripts": {

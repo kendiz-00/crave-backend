@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { orderService } from '../services';
 import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema } from '../validators';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { ApiError } from '@/types/errors';
 
 export class OrderController {
   /**
@@ -255,7 +256,10 @@ Notes: ${order.notes || 'None'}
 `.trim();
 
     const encodedMessage = encodeURIComponent(message);
-    const phoneNumber = process.env.WHATSAPP_NUMBER || '233241234567';
+    const phoneNumber = process.env.WHATSAPP_NUMBER;
+    if (!phoneNumber) {
+      throw new ApiError(500, 'WhatsApp number not configured');
+    }
     const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
 
     return {
