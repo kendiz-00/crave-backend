@@ -19,7 +19,7 @@ COPY . .
 RUN npx prisma generate
 
 # Build TypeScript
-RUN npm run build
+RUN npm run build && grep "./config" dist/app.js
 
 # Production stage
 FROM node:18-alpine AS production
