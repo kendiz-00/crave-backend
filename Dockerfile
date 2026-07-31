@@ -1,18 +1,13 @@
 # CRAVE Backend Dockerfile
 
 # Build stage
-FROM node:18-alpine AS builder
+FROM node:18-bookworm-slim AS builder
 
 WORKDIR /app
 
 # Copy package files and Prisma schema first
 COPY package*.json ./
 COPY prisma ./prisma/
-
-RUN echo "=== PRISMA CONTENTS ===" && \
-    ls -la && \
-    ls -la prisma && \
-    cat prisma/schema.prisma | head -20
 
 # Install all dependencies (including dev for build)
 RUN npm ci
@@ -27,16 +22,16 @@ RUN npx prisma generate
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine AS production
+FROM node:18-bookworm-slim AS production
 
 WORKDIR /app
 
 # Install dumb-init for proper signal handling and curl for health checks
-RUN apk add --no-cache dumb-init curl
+RUN apt-get update && apt-get install -y dumb-init curl && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+RUN groupadd -r nodejs && \
+    useradd -r -g nodejs -u 1001 nodejs
 
 # Copy package files and Prisma schema
 COPY package*.json ./
