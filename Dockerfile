@@ -5,9 +5,14 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files and Prisma schema first
 COPY package*.json ./
 COPY prisma ./prisma/
+
+RUN echo "=== PRISMA CONTENTS ===" && \
+    ls -la && \
+    ls -la prisma && \
+    cat prisma/schema.prisma | head -20
 
 # Install all dependencies (including dev for build)
 RUN npm ci
@@ -18,8 +23,8 @@ COPY . .
 # Generate Prisma Client
 RUN npx prisma generate
 
-# Build TypeScript
-RUN npm run build && grep "./config" dist/app.js
+# Build TypeScript with tsc-alias for path resolution
+RUN npm run build
 
 # Production stage
 FROM node:18-alpine AS production
@@ -33,17 +38,20 @@ RUN apk add --no-cache dumb-init curl
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy package files
+# Copy package files and Prisma schema
 COPY package*.json ./
+COPY prisma ./prisma/
 
 # Install production dependencies only
-RUN npm ci --only=production && \
+# Skip postinstall since Prisma client is already generated
+RUN npm ci --omit=dev --ignore-scripts && \
     npm cache clean --force
 
-# Copy built application from builder
+# Copy built application and Prisma artifacts from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder --chown=nodejs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
 # Switch to non-root user
 USER nodejs
@@ -58,5 +66,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Start application
-CMD ["node", "dist/server.js"]
+# Run migrations and start application
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]

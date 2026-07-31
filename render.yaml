@@ -5,11 +5,10 @@ services:
   # Web Service (Backend API)
   - type: web
     name: crave-backend
-    env: node
+    env: docker
     region: oregon
     plan: starter
-    buildCommand: npm install && npm run build
-    startCommand: node dist/server.js
+    # Docker build and start commands are handled by Dockerfile
     envVars:
       # Node Environment
       - key: NODE_ENV
@@ -41,7 +40,7 @@ services:
       
       # CORS Configuration
       - key: CORS_ALLOWED_ORIGINS
-        value: https://crave.vercel.app,https://crave.com
+        value: https://crave-frontend.vercel.app,https://crave-staging.vercel.app,https://crave.vercel.app,https://crave.com
       
       # Rate Limiting
       - key: RATE_LIMIT_WINDOW_MS
@@ -55,7 +54,7 @@ services:
       
       # Client URL
       - key: CLIENT_URL
-        value: https://crave.vercel.app
+        value: https://crave-frontend.vercel.app
 
 # PostgreSQL Database
 databases:
