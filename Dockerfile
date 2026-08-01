@@ -61,5 +61,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Run migrations and start application
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]
+# Run migrations with full debug logging and start application
+CMD ["sh", "-c", "PRISMA_SCHEMA_ENGINE_LOG_LEVEL=trace RUST_BACKTRACE=1 npx prisma migrate deploy && node dist/server.js"]
