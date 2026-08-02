@@ -38,8 +38,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install production dependencies only
-# Skip postinstall since Prisma client is already generated
-RUN npm ci --omit=dev --ignore-scripts && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
 # Copy built application and Prisma artifacts from builder
@@ -61,5 +60,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Run migrations with full debug logging and start application
-CMD ["sh", "-c", "PRISMA_SCHEMA_ENGINE_LOG_LEVEL=trace RUST_BACKTRACE=1 npx prisma migrate deploy && node dist/server.js"]
+# Run migrations and start application
+CMD ["sh", "-c", "NODE_ENV=production npx prisma migrate deploy && node dist/server.js"]
