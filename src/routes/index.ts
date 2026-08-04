@@ -9,7 +9,7 @@ import cartRoute from '@/routes/cart.route';
 import orderRoute from '@/routes/order.route';
 import rewardRoute from '@/routes/reward.route';
 import paymentRoute from '@/routes/payment.route';
-import seedRoute from "./seed.route";
+import seedRoutes from "./seed.route";
 
 const router = Router();
 
@@ -23,6 +23,6 @@ router.use('/api/cart', cartRoute);
 router.use('/api/orders', orderRoute);
 router.use('/api/rewards', rewardRoute);
 router.use('/api/payments', paymentRoute);
-router.use("/seed", seedRoute);
+router.use("/seed", seedRoutes);
 
 export default router;
