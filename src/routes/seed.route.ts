@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { execSync } from "child_process";
+import { seedDatabase } from "@/utils/seedDatabase";
 
 const router = Router();
 
@@ -12,18 +12,18 @@ router.post("/", async (req, res) => {
       });
     }
 
-    execSync("npm run seed", { stdio: "inherit" });
+    await seedDatabase();
 
     return res.json({
       success: true,
       message: "Database seeded successfully",
     });
-  } catch (error) {
-    console.error(error);
+  } catch (err) {
+    console.error(err);
 
     return res.status(500).json({
       success: false,
-      message: "Seed failed",
+      error: String(err),
     });
   }
 });
