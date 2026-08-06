@@ -29,18 +29,6 @@ export class CategoryService {
     const categories = await prisma.category.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
-      include: {
-        _count: {
-          select: {
-            menuItems: {
-              where: {
-                isAvailable: true,
-                isDeleted: false,
-              },
-            },
-          },
-        },
-      },
     });
 
     return categories;
