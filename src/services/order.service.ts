@@ -79,6 +79,22 @@ export class OrderService {
 
     // Create order in transaction
     const order = await prisma.$transaction(async (tx) => {
+      // Atomically claim cart from ACTIVE to CHECKED_OUT
+      // This prevents concurrent checkout requests from creating duplicate orders
+      const claimResult = await tx.cart.updateMany({
+        where: {
+          id: cart.id,
+          status: 'ACTIVE',
+        },
+        data: {
+          status: 'CHECKED_OUT',
+        },
+      });
+
+      if (claimResult.count !== 1) {
+        throw new ApiError(400, 'Cart is no longer available for checkout');
+      }
+
       // Create order
       const newOrder = await tx.order.create({
         data: {
@@ -141,12 +157,6 @@ export class OrderService {
         });
       }
 
-      // Mark cart as checked out
-      await tx.cart.update({
-        where: { id: cart.id },
-        data: { status: 'CHECKED_OUT' },
-      });
-
       // Award reward points (1 point per GHS spent)
       const pointsEarned = Math.floor(grandTotal);
       await this.createRewardTransaction(
@@ -159,7 +169,7 @@ export class OrderService {
       );
 
       // Generate reward code for customer
-      const rewardCode = await this.generateRewardCode(tx);
+      const rewardCode = await this.generateRewardCode(tx, userId);
       await tx.order.update({
         where: { id: newOrder.id },
         data: { rewardCodeGenerated: rewardCode.code, rewardPointsEarned: pointsEarned },
@@ -215,10 +225,14 @@ export class OrderService {
       if (item.addOns && item.addOns.length > 0) {
         const itemAddOnIds = item.addOns.map((a: { addOnId: string }) => a.addOnId);
 
-        // Check if all add-ons exist
+        // Check if all add-ons exist and belong to this menu item
         for (const addOnId of itemAddOnIds) {
-          if (!addOnMap.has(addOnId)) {
+          const addOn = addOnMap.get(addOnId);
+          if (!addOn) {
             throw new ApiError(400, 'One or more add-ons are invalid or no longer available');
+          }
+          if (addOn.menuItemId !== item.menuItemId) {
+            throw new ApiError(400, `Add-on ${addOn.name} is not available for this menu item`);
           }
         }
 
@@ -536,13 +550,14 @@ export class OrderService {
   /**
    * Generate reward code
    */
-  private async generateRewardCode(tx: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  private async generateRewardCode(tx: any, userId: string) { // eslint-disable-line @typescript-eslint/no-explicit-any
     const code = this.generateRewardCodeString();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30); // Expires in 30 days
 
     return tx.rewardCode.create({
       data: {
+        userId,
         code,
         reward: 'FREE DRINK',
         generatedAt: new Date(),
