@@ -342,6 +342,7 @@ model RewardTransaction {
   id             String                @id @default(uuid())
   userId         String
   orderId        String?
+  referenceId    String?
   type           RewardTransactionType
   points         Int
   runningBalance Int
@@ -353,7 +354,9 @@ model RewardTransaction {
 
   @@index([userId])
   @@index([orderId])
+  @@index([referenceId])
   @@index([createdAt])
+  @@unique([userId, referenceId])
 }
 
 // Enum for reward code status

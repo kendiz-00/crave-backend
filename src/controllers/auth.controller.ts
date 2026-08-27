@@ -3,16 +3,26 @@ import { AuthService } from '@/services';
 import { registerSchema, loginSchema, refreshTokenSchema } from '@/validators';
 import { asyncHandler } from '@/middleware';
 import { HttpStatus } from '@/types';
+import { ApiError } from '@/types/errors';
 
 export const registerController = asyncHandler(async (req: Request, res: Response) => {
-  const validatedData = registerSchema.parse(req.body);
-  const result = await AuthService.register(validatedData);
+  try {
+    const validatedData = registerSchema.parse(req.body);
+    const result = await AuthService.register(validatedData);
 
-  res.status(HttpStatus.CREATED).json({
-    success: true,
-    message: 'User registered successfully',
-    data: result,
-  });
+    res.status(HttpStatus.CREATED).json({
+      success: true,
+      message: 'User registered successfully',
+      data: result,
+    });
+  } catch (error: any) {
+    // Handle Zod validation errors
+    if (error.name === 'ZodError') {
+      const firstError = error.errors[0];
+      throw new ApiError(HttpStatus.BAD_REQUEST, firstError?.message || 'Validation failed');
+    }
+    throw error;
+  }
 });
 
 export const loginController = asyncHandler(async (req: Request, res: Response) => {

@@ -8,6 +8,13 @@ const router = Router();
 router.use(authenticate);
 
 /**
+ * @route   GET /api/rewards
+ * @desc    Get user's full reward state
+ * @access  Private
+ */
+router.get('/', orderController.getRewards);
+
+/**
  * @route   GET /api/rewards/balance
  * @desc    Get user's reward balance
  * @access  Private
@@ -20,5 +27,12 @@ router.get('/balance', orderController.getRewardBalance);
  * @access  Private
  */
 router.get('/history', orderController.getRewardHistory);
+
+/**
+ * @route   POST /api/rewards/transactions
+ * @desc    Create a reward transaction for the authenticated user
+ * @access  Private
+ */
+router.post('/transactions', orderController.createRewardTransaction);
 
 export default router;

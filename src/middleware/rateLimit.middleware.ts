@@ -31,7 +31,7 @@ export const authRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skipFailedRequests: false,
+  skipFailedRequests: true, // Don't count validation failures toward rate limit
   keyGenerator: (req) => {
     // Rate limit by IP and email for login attempts
     const email = req.body?.email || req.ip;

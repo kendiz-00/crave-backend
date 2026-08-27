@@ -4,15 +4,15 @@ const envSchema = z.object({
   PORT: z.string().transform((val) => parseInt(val, 10)),
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32),
-  JWT_REFRESH_SECRET: z.string().min(32),
+  JWT_REFRESH_SECRET: z.string().min(32).optional().default('dev-refresh-secret-key-for-development-only-do-not-use-in-production'),
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),
-  PAYSTACK_PUBLIC_KEY: z.string().startsWith('pk_'),
-  PAYSTACK_SECRET_KEY: z.string().startsWith('sk_'),
-  PAYSTACK_WEBHOOK_SECRET: z.string().startsWith('whsec_'),
+  PAYSTACK_PUBLIC_KEY: z.string().startsWith('pk_').optional(),
+  PAYSTACK_SECRET_KEY: z.string().startsWith('sk_').optional(),
+  PAYSTACK_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
   CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
-  CLIENT_URL: z.string().url(),
+  CLIENT_URL: z.string().url().optional().default('http://localhost:3000'),
   RATE_LIMIT_WINDOW_MS: z
     .string()
     .transform((val) => parseInt(val, 10))

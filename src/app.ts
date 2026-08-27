@@ -28,11 +28,11 @@ export const createApp = (): Application => {
   app.use(
     cors({
       origin: config.isDevelopment
-        ? ['http://localhost:3000', 'http://localhost:5173']
+        ? ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5500', 'http://127.0.0.1:5500', 'http://localhost:1422', 'http://127.0.0.1:1422', 'http://localhost:8080', 'http://127.0.0.1:8080']
         : config.cors.allowedOrigins,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'If-None-Match'],
       exposedHeaders: ['Content-Range', 'X-Content-Range'],
       maxAge: 86400, // 24 hours
     })

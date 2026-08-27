@@ -46,11 +46,13 @@ export {
   validateRewardCodeSchema,
   redeemRewardCodeSchema,
   createRewardTransactionSchema,
+  createRewardTransactionForUserSchema,
 } from './reward.validator';
 export type {
   ValidateRewardCodeInput,
   RedeemRewardCodeInput,
   CreateRewardTransactionInput,
+  CreateRewardTransactionForUserInput,
 } from './reward.validator';
 export {
   initializePaymentSchema,

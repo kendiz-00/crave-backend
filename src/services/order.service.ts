@@ -519,10 +519,10 @@ export class OrderService {
   /**
    * Create reward transaction
    */
-  private async createRewardTransaction(
+  async createRewardTransaction(
     tx: any, // eslint-disable-line @typescript-eslint/no-explicit-any
     userId: string,
-    orderId: string,
+    orderId: string | null,
     type: string,
     points: number,
     reason: string,
@@ -622,6 +622,157 @@ export class OrderService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Calculate tier from points
+   * Uses the same tier thresholds as the frontend configuration
+   */
+  private calculateTier(points: number): string {
+    if (points >= 5000) return 'Elite';
+    if (points >= 3000) return 'Diamond';
+    if (points >= 1500) return 'Gold';
+    if (points >= 500) return 'Silver';
+    return 'Bronze';
+  }
+
+  /**
+   * Get user's claimed rewards (redeemed reward codes)
+   */
+  private async getClaimedRewards(userId: string) {
+    const claimedCodes = await prisma.rewardCode.findMany({
+      where: {
+        userId,
+        status: 'REDEEMED',
+      },
+      orderBy: { redeemedAt: 'desc' },
+      select: {
+        code: true,
+        reward: true,
+        redeemedAt: true,
+        orderId: true,
+      },
+    });
+
+    // Fetch order numbers for codes that have orderId
+    const orderIds = claimedCodes.filter(c => c.orderId).map(c => c.orderId);
+    const orders = orderIds.length > 0 ? await prisma.order.findMany({
+      where: { id: { in: orderIds as string[] } },
+      select: { id: true, orderNumber: true },
+    }) : [];
+
+    const orderMap = new Map(orders.map(o => [o.id, o.orderNumber]));
+
+    return claimedCodes.map((code) => ({
+      code: code.code,
+      reward: code.reward,
+      redeemedAt: code.redeemedAt,
+      orderNumber: code.orderId ? orderMap.get(code.orderId) || null : null,
+    }));
+  }
+
+  /**
+   * Get user's full reward state
+   * Returns points, tier, claimed rewards, and recent history
+   */
+  async getUserFullRewards(userId: string) {
+    const [balance, claimedRewards, recentHistory] = await Promise.all([
+      this.getUserRewardBalance(userId),
+      this.getClaimedRewards(userId),
+      prisma.rewardTransaction.findMany({
+        where: { userId },
+        include: {
+          order: {
+            select: {
+              orderNumber: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+    ]);
+
+    const tier = this.calculateTier(balance);
+
+    return {
+      points: balance,
+      tier,
+      claimedRewards,
+      history: recentHistory,
+    };
+  }
+
+  /**
+   * Create reward transaction for authenticated user
+   * Uses transaction to ensure atomicity and prevent race conditions
+   * Includes duplicate protection via orderId and referenceId
+   * Uses raw SQL with FOR UPDATE to lock rows for concurrency safety
+   */
+  async createRewardTransactionForUser(
+    userId: string,
+    type: string,
+    points: number,
+    reason: string,
+    orderId?: string | null,
+    referenceId?: string | null,
+  ) {
+    return prisma.$transaction(async (tx) => {
+      // Check for duplicate transaction via orderId or referenceId
+      const whereClause: any = { userId };
+      
+      if (orderId) {
+        whereClause.orderId = orderId;
+      }
+      if (referenceId) {
+        whereClause.referenceId = referenceId;
+      }
+
+      const existingTransaction = await tx.rewardTransaction.findFirst({
+        where: whereClause,
+      });
+
+      if (existingTransaction) {
+        throw new ApiError(400, 'Duplicate transaction: this reward has already been processed');
+      }
+
+      // Get current balance using raw SQL with FOR UPDATE to prevent race conditions
+      const result = await tx.$queryRaw<Array<{ runningBalance: number }>>`
+        SELECT "runningBalance" 
+        FROM "RewardTransaction" 
+        WHERE "userId" = ${userId} 
+        ORDER BY "createdAt" DESC 
+        LIMIT 1 
+        FOR UPDATE
+      `;
+
+      const currentBalance = result.length > 0 ? result[0].runningBalance : 0;
+      const newBalance = currentBalance + points;
+
+      // Prevent negative balance for REDEEM transactions
+      if (type === 'REDEEM' && newBalance < 0) {
+        throw new ApiError(400, 'Insufficient points balance');
+      }
+
+      // Create transaction with referenceId
+      const transaction = await tx.rewardTransaction.create({
+        data: {
+          userId,
+          orderId,
+          referenceId,
+          type: type as any,
+          points,
+          runningBalance: newBalance,
+          reason,
+        },
+      });
+
+      return {
+        transaction,
+        newBalance,
+        previousBalance: currentBalance,
+      };
+    });
   }
 }
 

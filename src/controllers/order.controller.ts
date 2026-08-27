@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { orderService } from '../services';
-import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema } from '../validators';
+import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema, createRewardTransactionForUserSchema } from '../validators';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { ApiError } from '@/types/errors';
 
@@ -204,6 +204,57 @@ export class OrderController {
     res.status(200).json({
       success: true,
       ...result,
+    });
+  });
+
+  /**
+   * GET /rewards
+   * Get user's full reward state
+   */
+  getRewards = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const rewards = await orderService.getUserFullRewards(userId);
+
+    res.status(200).json({
+      success: true,
+      data: rewards,
+    });
+  });
+
+  /**
+   * POST /rewards/transactions
+   * Create a reward transaction for the authenticated user
+   */
+  createRewardTransaction = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const data = createRewardTransactionForUserSchema.parse(req.body);
+
+    const result = await orderService.createRewardTransactionForUser(
+      userId,
+      data.type,
+      data.points,
+      data.reason,
+      data.orderId || null,
+      data.referenceId || null,
+    );
+
+    res.status(201).json({
+      success: true,
+      data: {
+        transaction: result.transaction,
+        newBalance: result.newBalance,
+        previousBalance: result.previousBalance,
+      },
     });
   });
 
