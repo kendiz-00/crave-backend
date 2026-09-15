@@ -28,8 +28,14 @@ export const createRewardTransactionForUserSchema = z.object({
   referenceId: z.string().max(100, 'Reference ID must not exceed 100 characters').optional(),
 });
 
+// Claim reward validator
+export const claimRewardSchema = z.object({
+  rewardId: z.string().min(1, 'Reward ID is required'),
+});
+
 // Types
 export type ValidateRewardCodeInput = z.infer<typeof validateRewardCodeSchema>;
 export type RedeemRewardCodeInput = z.infer<typeof redeemRewardCodeSchema>;
 export type CreateRewardTransactionInput = z.infer<typeof createRewardTransactionSchema>;
 export type CreateRewardTransactionForUserInput = z.infer<typeof createRewardTransactionForUserSchema>;
+export type ClaimRewardInput = z.infer<typeof claimRewardSchema>;

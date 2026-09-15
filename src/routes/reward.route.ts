@@ -35,4 +35,11 @@ router.get('/history', orderController.getRewardHistory);
  */
 router.post('/transactions', orderController.createRewardTransaction);
 
+/**
+ * @route   POST /api/rewards/claims
+ * @desc    Claim a milestone reward for the authenticated user
+ * @access  Private
+ */
+router.post('/claims', orderController.claimReward);
+
 export default router;

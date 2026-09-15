@@ -292,6 +292,8 @@ describe('Reward Endpoints', () => {
           type: 'REDEEM',
           points: -10,
           description: 'Reward code redemption',
+          runningBalance: 90,
+          reason: 'Test redeem',
         },
       });
 
@@ -300,6 +302,129 @@ describe('Reward Endpoints', () => {
 
       // Cleanup
       await prisma.rewardTransaction.delete({ where: { id: transaction.id } });
+    });
+  });
+
+  describe('Phase 4 — Idempotency and Concurrency Tests', () => {
+    it('should safely handle duplicate referenceId idempotency', async () => {
+      const refId = `achievement_test_${Date.now()}`;
+
+      // First request
+      const res1 = await request(app)
+        .post('/api/rewards/transactions')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          type: 'EARN',
+          points: 50,
+          reason: 'Test achievement',
+          referenceId: refId,
+        });
+
+      expect(res1.status).toBe(201);
+      expect(res1.body.success).toBe(true);
+      const balance1 = res1.body.data.newBalance;
+
+      // Second identical request (retry)
+      const res2 = await request(app)
+        .post('/api/rewards/transactions')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          type: 'EARN',
+          points: 50,
+          reason: 'Test achievement retry',
+          referenceId: refId,
+        });
+
+      expect(res2.status).toBe(201);
+      expect(res2.body.success).toBe(true);
+      expect(res2.body.data.isDuplicate).toBe(true);
+      expect(res2.body.data.newBalance).toBe(balance1); // Balance remains unchanged
+    });
+
+    it('should allow multiple un-referenced transactions without false duplicate rejection', async () => {
+      // Transaction 1 without referenceId
+      const res1 = await request(app)
+        .post('/api/rewards/transactions')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          type: 'EARN',
+          points: 15,
+          reason: 'Unreferenced transaction 1',
+        });
+
+      expect(res1.status).toBe(201);
+
+      // Transaction 2 without referenceId (must NOT be rejected as duplicate)
+      const res2 = await request(app)
+        .post('/api/rewards/transactions')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          type: 'EARN',
+          points: 25,
+          reason: 'Unreferenced transaction 2',
+        });
+
+      expect(res2.status).toBe(201);
+      expect(res2.body.data.isDuplicate).toBe(false);
+      expect(res2.body.data.newBalance).toBe(res1.body.data.newBalance + 25);
+    });
+
+    it('should handle concurrent reward requests for a new user correctly', async () => {
+      // Create new test user
+      const newUser = await prisma.user.create({
+        data: {
+          email: `concurrent_${Date.now()}@example.com`,
+          password: 'password123',
+          firstName: 'Concurrent',
+          lastName: 'User',
+          role: 'CUSTOMER',
+        },
+      });
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({
+          email: newUser.email,
+          password: 'password123',
+        });
+      const newToken = loginRes.body.data.accessToken;
+
+      // Launch 2 simultaneous requests
+      const reqA = request(app)
+        .post('/api/rewards/transactions')
+        .set('Authorization', `Bearer ${newToken}`)
+        .send({
+          type: 'EARN',
+          points: 50,
+          reason: 'Concurrent A',
+          referenceId: `conc_A_${Date.now()}`,
+        });
+
+      const reqB = request(app)
+        .post('/api/rewards/transactions')
+        .set('Authorization', `Bearer ${newToken}`)
+        .send({
+          type: 'EARN',
+          points: 50,
+          reason: 'Concurrent B',
+          referenceId: `conc_B_${Date.now()}`,
+        });
+
+      const [resA, resB] = await Promise.all([reqA, reqB]);
+
+      expect(resA.status).toBe(201);
+      expect(resB.status).toBe(201);
+
+      // Verify that final balance equals sum of both transactions (100)
+      const finalRes = await request(app)
+        .get('/api/rewards')
+        .set('Authorization', `Bearer ${newToken}`);
+
+      expect(finalRes.body.data.points).toBe(100);
+
+      // Cleanup
+      await prisma.rewardTransaction.deleteMany({ where: { userId: newUser.id } });
+      await prisma.user.delete({ where: { id: newUser.id } });
     });
   });
 });

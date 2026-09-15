@@ -25,6 +25,8 @@ export const createOrderSchema = z.object({
   longitude: z.number().min(-180).max(180).optional(),
   notes: z.string().max(500, 'Notes must not exceed 500 characters').optional(),
   rewardCodeUsed: z.string().optional(),
+  rewardPointsUsed: z.number().int().nonnegative().optional(),
+  claimedRewardId: z.string().optional().nullable(),
 });
 
 // Update order status validator

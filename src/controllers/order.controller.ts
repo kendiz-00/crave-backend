@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { orderService } from '../services';
-import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema, createRewardTransactionForUserSchema } from '../validators';
+import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema, createRewardTransactionForUserSchema, claimRewardSchema } from '../validators';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { ApiError } from '@/types/errors';
 
@@ -259,6 +259,27 @@ export class OrderController {
   });
 
   /**
+   * POST /rewards/claims
+   * Claim a milestone reward for the authenticated user
+   */
+  claimReward = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const data = claimRewardSchema.parse(req.body);
+
+    const claim = await orderService.claimReward(userId, data.rewardId);
+
+    res.status(201).json({
+      success: true,
+      data: claim,
+    });
+  });
+
+  /**
    * Generate WhatsApp message payload
    */
   private generateWhatsAppPayload(order: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -284,6 +305,7 @@ ${items}
 *Summary:*
 Subtotal: GHS ${order.subtotal}
 Discount: GHS ${order.discount}
+Reward Points Used: ${order.rewardPointsUsed || 0} (-GHS ${order.rewardPointsUsed || 0})
 Tax: GHS ${order.tax}
 Delivery Fee: GHS ${order.deliveryFee}
 Grand Total: GHS ${order.grandTotal}

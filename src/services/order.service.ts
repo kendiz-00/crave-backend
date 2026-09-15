@@ -5,6 +5,62 @@ import { cartService } from './cart.service';
 
 const prisma = new PrismaClient();
 
+const MILESTONE_CONFIG: Record<string, { points: number; name: string; categories?: string[]; names?: string[] }> = {
+  milestone_free_drink_100: {
+    points: 100,
+    name: 'Free Drink',
+    categories: ['smoothies'],
+    names: [
+      'Strawberry Colada',
+      'Pina Colada',
+      'Watermelon Mint Ice',
+      'Green Glow',
+      'Green Glow Smoothie',
+      'Tropical Fruit Blend',
+      'Pineapple Strawberry',
+      'Strawberries and Cream',
+      'Lemonade Ice',
+      'Banana Peanut Butter Chocolate',
+    ],
+  },
+  milestone_free_dessert_250: {
+    points: 250,
+    name: 'Free Dessert',
+    categories: ['cupcakes'],
+    names: [
+      'Chocolate Rich Buttercream Frosting Jar Cake',
+      'Biscoff Jar Cake',
+      'Lemon Buttercream Jar Cake',
+      'Vanilla Buttercream Cake Slice',
+      'Bailey\'s Irish Cream Jar Cake',
+      'Salted Caramel Cake',
+      'Pistachio Dream Jar Cake',
+      'Coffee Latte Jar Cake',
+    ],
+  },
+  milestone_free_loaded_fries_500: {
+    points: 500,
+    name: 'Free Loaded Fries',
+    categories: ['loaded-fries'],
+    names: [
+      'Loaded Fries',
+      'Cheese Beef Loaded Fries',
+      'Loaded BBQ Chicken Cheddar Cheese Fries',
+      'Bacon Cheddar Fries',
+    ],
+  },
+  milestone_premium_combo_750: {
+    points: 750,
+    name: 'Premium Combo',
+    categories: ['texas-crispy-chicken', 'jamaican-kitchen', 'burgers-combos'],
+  },
+  milestone_vip_reward_1000: {
+    points: 1000,
+    name: 'VIP Reward',
+    categories: ['texas-crispy-chicken', 'jamaican-kitchen', 'mexican-food', 'breakfast', 'smoothies', 'cupcakes', 'loaded-fries'],
+  },
+};
+
 export class OrderService {
   /**
    * Generate unique order number
@@ -67,12 +123,92 @@ export class OrderService {
       rewardCodeUsed = rewardCode.code;
     }
 
+    // Validate and process reward points redemption if provided
+    let pointsDiscount = 0;
+    let pointsRedeemed = 0;
+    if (data.rewardPointsUsed && data.rewardPointsUsed > 0) {
+      // Get user's current reward balance
+      const currentBalance = await this.getUserRewardBalance(userId);
+      
+      // Validate user has enough points
+      if (currentBalance < data.rewardPointsUsed) {
+        throw new ApiError(400, 'Insufficient reward points');
+      }
+      
+      // Calculate totals first to validate points don't exceed eligible amount
+      const cartTotal = await this.calculateCartTotalFromItems(cart.items);
+      const subtotal = cartTotal.subtotal;
+      
+      // Validate points don't exceed subtotal (1 point = 1 GHS)
+      if (data.rewardPointsUsed > subtotal) {
+        throw new ApiError(400, 'Reward points cannot exceed order subtotal');
+      }
+      
+      // Validate points don't exceed 10% of eligible subtotal (redemption cap)
+      const maxRedeemable = Math.floor(subtotal * 0.10);
+      if (data.rewardPointsUsed > maxRedeemable) {
+        throw new ApiError(400, `Maximum redeemable points is ${maxRedeemable} (10% of subtotal)`);
+      }
+      
+      pointsDiscount = data.rewardPointsUsed;
+      pointsRedeemed = data.rewardPointsUsed;
+    }
+
+    // Validate claimed milestone reward if provided
+    let rewardDiscount = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let validClaimToRedeem: any = null;
+    if (data.claimedRewardId) {
+      const claim = await prisma.rewardClaim.findFirst({
+        where: { id: data.claimedRewardId, userId },
+      });
+
+      if (!claim) {
+        throw new ApiError(400, 'Invalid reward claim');
+      }
+
+      if (claim.status !== 'CLAIMED') {
+        throw new ApiError(400, 'Reward claim has already been redeemed or is invalid');
+      }
+
+      const milestoneConfig = MILESTONE_CONFIG[claim.rewardId];
+      if (!milestoneConfig) {
+        throw new ApiError(400, 'Unknown reward milestone');
+      }
+
+      // Find eligible cart item
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let eligibleItem: any = null;
+      for (const item of cart.items) {
+        const catSlug = item.menuItem.category?.slug?.toLowerCase() || '';
+        const itemName = item.menuItem.name;
+
+        const catMatches = milestoneConfig.categories && milestoneConfig.categories.some(c => catSlug.includes(c.toLowerCase()));
+        const nameMatches = milestoneConfig.names && milestoneConfig.names.some(n => n.toLowerCase() === itemName.toLowerCase());
+
+        if (catMatches || nameMatches) {
+          if (!eligibleItem || Number(item.menuItem.price) > Number(eligibleItem.menuItem.price)) {
+            eligibleItem = item;
+          }
+        }
+      }
+
+      if (!eligibleItem) {
+        throw new ApiError(400, `Your cart does not contain an item eligible for ${milestoneConfig.name}`);
+      }
+
+      // Calculate authoritative discount (price of 1 unit of eligible item)
+      rewardDiscount = Number(eligibleItem.menuItem.price);
+      validClaimToRedeem = claim;
+    }
+
     // Calculate totals (backend recalculation to prevent price tampering)
     const cartTotal = await this.calculateCartTotalFromItems(cart.items);
     const subtotal = cartTotal.subtotal;
     const tax = subtotal * 0.05; // 5% tax
     const deliveryFee = data.orderType === OrderType.DELIVERY ? 15 : 0; // GHS 15 for delivery
-    const grandTotal = subtotal - discount + tax + deliveryFee;
+    const totalDiscount = discount + pointsDiscount + rewardDiscount;
+    const grandTotal = Math.max(0, subtotal - totalDiscount + tax + deliveryFee);
 
     // Generate order number
     const orderNumber = this.generateOrderNumber();
@@ -104,11 +240,12 @@ export class OrderService {
           paymentStatus: PaymentStatus.PENDING,
           orderType: data.orderType,
           subtotal,
-          discount,
+          discount: discount + rewardDiscount,
           tax,
           deliveryFee,
           grandTotal,
           rewardCodeUsed,
+          rewardPointsUsed: pointsRedeemed,
           customerName: data.customerName,
           customerPhone: data.customerPhone,
           customerEmail: data.customerEmail,
@@ -155,6 +292,38 @@ export class OrderService {
             redeemedAt: new Date(),
           },
         });
+      }
+
+      // Mark milestone reward claim as redeemed if applicable
+      if (validClaimToRedeem) {
+        const claimUpdate = await tx.rewardClaim.updateMany({
+          where: {
+            id: validClaimToRedeem.id,
+            userId,
+            status: 'CLAIMED',
+          },
+          data: {
+            status: 'REDEEMED',
+            redeemedAt: new Date(),
+            orderId: newOrder.id,
+          },
+        });
+
+        if (claimUpdate.count !== 1) {
+          throw new ApiError(400, 'Reward claim is no longer available for redemption');
+        }
+      }
+
+      // Redeem reward points if applicable (deduct before earning)
+      if (pointsRedeemed > 0) {
+        await this.createRewardTransactionForUser(
+          userId,
+          RewardTransactionType.REDEEM,
+          -pointsRedeemed,
+          `Reward points redeemed on order ${orderNumber}`,
+          newOrder.id,
+          `order_${newOrder.id}`,
+        );
       }
 
       // Award reward points (1 point per GHS spent)
@@ -527,6 +696,11 @@ export class OrderService {
     points: number,
     reason: string,
   ) {
+    // Lock user row first for concurrency safety
+    await tx.$queryRaw`
+      SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE
+    `;
+
     // Get current balance
     const lastTransaction = await tx.rewardTransaction.findFirst({
       where: { userId },
@@ -535,11 +709,23 @@ export class OrderService {
 
     const runningBalance = (lastTransaction?.runningBalance || 0) + points;
 
+    // Increment lifetimePointsEarned for EARN transactions
+    if (type === 'EARN' && points > 0) {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          lifetimePointsEarned: {
+            increment: points,
+          },
+        },
+      });
+    }
+
     return tx.rewardTransaction.create({
       data: {
         userId,
         orderId,
-        type,
+        type: type as any,
         points,
         runningBalance,
         reason,
@@ -672,13 +858,74 @@ export class OrderService {
   }
 
   /**
+   * Claim a milestone reward for user
+   */
+  async claimReward(userId: string, rewardId: string) {
+    const milestoneConfig = MILESTONE_CONFIG[rewardId];
+    if (!milestoneConfig) {
+      throw new ApiError(400, 'Invalid or unknown reward milestone ID');
+    }
+
+    // Check user's current points balance
+    const currentBalance = await this.getUserRewardBalance(userId);
+    if (currentBalance < milestoneConfig.points) {
+      throw new ApiError(400, `Insufficient points balance. ${milestoneConfig.points} points required to claim ${milestoneConfig.name}.`);
+    }
+
+    // Check if user already claimed this milestone reward
+    const existingClaim = await prisma.rewardClaim.findUnique({
+      where: {
+        userId_rewardId: {
+          userId,
+          rewardId,
+        },
+      },
+    });
+
+    if (existingClaim) {
+      return existingClaim;
+    }
+
+    // Create persistent claim in PostgreSQL (idempotent / concurrency safe via unique constraint)
+    try {
+      const claim = await prisma.rewardClaim.create({
+        data: {
+          userId,
+          rewardId,
+          status: 'CLAIMED',
+        },
+      });
+
+      return claim;
+    } catch (error: any) {
+      // Handle unique constraint race condition
+      if (error?.code === 'P2002') {
+        const claim = await prisma.rewardClaim.findUnique({
+          where: {
+            userId_rewardId: {
+              userId,
+              rewardId,
+            },
+          },
+        });
+        if (claim) return claim;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Get user's full reward state
-   * Returns points, tier, claimed rewards, and recent history
+   * Returns points, tier, lifetimePointsEarned, claimed rewards, milestone claims, and recent history
    */
   async getUserFullRewards(userId: string) {
-    const [balance, claimedRewards, recentHistory] = await Promise.all([
+    const [balance, claimedRewards, milestoneClaims, recentHistory, user] = await Promise.all([
       this.getUserRewardBalance(userId),
       this.getClaimedRewards(userId),
+      prisma.rewardClaim.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      }),
       prisma.rewardTransaction.findMany({
         where: { userId },
         include: {
@@ -691,6 +938,10 @@ export class OrderService {
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { lifetimePointsEarned: true },
+      }),
     ]);
 
     const tier = this.calculateTier(balance);
@@ -698,7 +949,9 @@ export class OrderService {
     return {
       points: balance,
       tier,
+      lifetimePointsEarned: user?.lifetimePointsEarned || 0,
       claimedRewards,
+      claims: milestoneClaims,
       history: recentHistory,
     };
   }
@@ -718,35 +971,45 @@ export class OrderService {
     referenceId?: string | null,
   ) {
     return prisma.$transaction(async (tx) => {
-      // Check for duplicate transaction via orderId or referenceId
-      const whereClause: any = { userId };
-      
-      if (orderId) {
-        whereClause.orderId = orderId;
-      }
-      if (referenceId) {
-        whereClause.referenceId = referenceId;
+      // Check for duplicate transaction via orderId or referenceId ONLY if provided
+      if (referenceId || orderId) {
+        const orConditions: any[] = [];
+        if (referenceId) {
+          orConditions.push({ referenceId });
+        }
+        if (orderId) {
+          orConditions.push({ orderId });
+        }
+
+        const existingTransaction = await tx.rewardTransaction.findFirst({
+          where: {
+            userId,
+            OR: orConditions,
+          },
+        });
+
+        if (existingTransaction) {
+          return {
+            transaction: existingTransaction,
+            newBalance: existingTransaction.runningBalance,
+            previousBalance: existingTransaction.runningBalance - existingTransaction.points,
+            isDuplicate: true,
+          };
+        }
       }
 
-      const existingTransaction = await tx.rewardTransaction.findFirst({
-        where: whereClause,
-      });
-
-      if (existingTransaction) {
-        throw new ApiError(400, 'Duplicate transaction: this reward has already been processed');
-      }
-
-      // Get current balance using raw SQL with FOR UPDATE to prevent race conditions
-      const result = await tx.$queryRaw<Array<{ runningBalance: number }>>`
-        SELECT "runningBalance" 
-        FROM "RewardTransaction" 
-        WHERE "userId" = ${userId} 
-        ORDER BY "createdAt" DESC 
-        LIMIT 1 
-        FOR UPDATE
+      // Lock user row first for per-user serial execution and concurrency safety
+      await tx.$queryRaw`
+        SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE
       `;
 
-      const currentBalance = result.length > 0 ? result[0].runningBalance : 0;
+      // Get current balance from last transaction
+      const lastTransaction = await tx.rewardTransaction.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const currentBalance = lastTransaction?.runningBalance || 0;
       const newBalance = currentBalance + points;
 
       // Prevent negative balance for REDEEM transactions
@@ -754,12 +1017,24 @@ export class OrderService {
         throw new ApiError(400, 'Insufficient points balance');
       }
 
-      // Create transaction with referenceId
+      // Increment lifetimePointsEarned for EARN transactions
+      if (type === 'EARN' && points > 0) {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            lifetimePointsEarned: {
+              increment: points,
+            },
+          },
+        });
+      }
+
+      // Create transaction with referenceId & orderId
       const transaction = await tx.rewardTransaction.create({
         data: {
           userId,
-          orderId,
-          referenceId,
+          orderId: orderId || null,
+          referenceId: referenceId || null,
           type: type as any,
           points,
           runningBalance: newBalance,
@@ -771,6 +1046,7 @@ export class OrderService {
         transaction,
         newBalance,
         previousBalance: currentBalance,
+        isDuplicate: false,
       };
     });
   }

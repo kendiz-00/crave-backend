@@ -19,16 +19,17 @@ model HealthCheck {
 
 // User model for authentication
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  phone     String?  @unique
-  password  String
-  firstName String
-  lastName  String
-  role      Role     @default(CUSTOMER)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  email               String   @unique
+  phone               String?  @unique
+  password            String
+  firstName           String
+  lastName            String
+  role                Role     @default(CUSTOMER)
+  isActive            Boolean  @default(true)
+  lifetimePointsEarned Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   addresses          Address[]
   refreshTokens      RefreshToken[]
@@ -36,6 +37,7 @@ model User {
   orders             Order[]
   rewardTransactions RewardTransaction[]
   rewardCodes        RewardCode[]
+  rewardClaims       RewardClaim[]
 
   @@index([email])
   @@index([phone])
@@ -268,6 +270,7 @@ model Order {
   deliveryFee         Decimal       @default(0) @db.Decimal(10, 2)
   grandTotal          Decimal       @db.Decimal(10, 2)
   rewardPointsEarned  Int           @default(0)
+  rewardPointsUsed    Int           @default(0)
   rewardCodeUsed      String?
   rewardCodeGenerated String?
   notes               String?
@@ -284,6 +287,7 @@ model Order {
   items        OrderItem[]
   transactions RewardTransaction[]
   payments     Payment[]
+  rewardClaims RewardClaim[]
 
   @@index([userId])
   @@index([orderNumber])
@@ -430,4 +434,31 @@ model Payment {
   @@index([status])
   @@index([createdAt])
   @@index([status, createdAt]) // Composite index for payment filtering by status and date
+}
+
+// Enum for reward claim status
+enum RewardClaimStatus {
+  CLAIMED
+  REDEEMED
+}
+
+// RewardClaim model for tracking persistent milestone reward claims
+model RewardClaim {
+  id         String            @id @default(uuid())
+  userId     String
+  rewardId   String
+  status     RewardClaimStatus @default(CLAIMED)
+  claimedAt  DateTime          @default(now())
+  redeemedAt DateTime?
+  orderId    String?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, rewardId])
+  @@index([userId])
+  @@index([status])
+  @@index([orderId])
 }
