@@ -1,4 +1,4 @@
-import { PrismaClient, OrderStatus, PaymentStatus, OrderType, RewardTransactionType } from '@prisma/client';
+import { PrismaClient, OrderStatus, PaymentStatus, RewardTransactionType } from '@prisma/client';
 import { ApiError } from '../types/errors';
 import { CreateOrderInput, UpdateOrderStatusInput, UpdatePaymentStatusInput } from '../validators';
 import { cartService } from './cart.service';
@@ -206,7 +206,7 @@ export class OrderService {
     const cartTotal = await this.calculateCartTotalFromItems(cart.items);
     const subtotal = cartTotal.subtotal;
     const tax = subtotal * 0.05; // 5% tax
-    const deliveryFee = data.orderType === OrderType.DELIVERY ? 15 : 0; // GHS 15 for delivery
+    const deliveryFee = 0; // Delivery fee removed (GH¢ 0.00)
     const totalDiscount = discount + pointsDiscount + rewardDiscount;
     const grandTotal = Math.max(0, subtotal - totalDiscount + tax + deliveryFee);
 
