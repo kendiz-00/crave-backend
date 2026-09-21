@@ -8,6 +8,7 @@ export {
   refreshController,
   meController,
 } from './auth.controller';
+export { sendOtpController, verifyOtpController } from './otp.controller';
 export {
   createMenuItemController,
   getMenuItemController,

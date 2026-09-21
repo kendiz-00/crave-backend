@@ -14,8 +14,8 @@ export const generalRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health';
+    // Skip rate limiting for health checks and test environment
+    return req.path === '/health' || process.env.NODE_ENV === 'test';
   },
 });
 
@@ -32,6 +32,7 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipFailedRequests: true, // Don't count validation failures toward rate limit
+  skip: () => process.env.NODE_ENV === 'test', // Skip in test environment
   keyGenerator: (req) => {
     // Rate limit by IP and email for login attempts
     const email = req.body?.email || req.ip;
@@ -51,6 +52,7 @@ export const paymentRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test', // Skip in test environment
 });
 
 /**
@@ -66,7 +68,7 @@ export const writeRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Only apply to write operations
-    return !['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+    // Only apply to write operations or test environment
+    return !['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) || process.env.NODE_ENV === 'test';
   },
 });

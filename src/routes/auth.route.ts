@@ -7,8 +7,12 @@ import {
   meController,
 } from '@/controllers';
 import { authenticate, authRateLimiter } from '@/middleware';
+import otpRoutes from './otp.route';
 
 const router = Router();
+
+// OTP verification routes
+router.use('/phone', otpRoutes);
 
 // POST /api/auth/register - Register a new user
 router.post('/register', authRateLimiter, registerController);

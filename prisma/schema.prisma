@@ -20,8 +20,10 @@ model HealthCheck {
 // User model for authentication
 model User {
   id                  String   @id @default(uuid())
-  email               String   @unique
+  email               String?  @unique
   phone               String?  @unique
+  phoneVerified       Boolean  @default(false)
+  phoneVerifiedAt     DateTime?
   password            String
   firstName           String
   lastName            String
@@ -38,9 +40,11 @@ model User {
   rewardTransactions RewardTransaction[]
   rewardCodes        RewardCode[]
   rewardClaims       RewardClaim[]
+  phoneVerifications PhoneVerification[]
 
   @@index([email])
   @@index([phone])
+  @@index([phoneVerified])
 }
 
 // Address model for user addresses
@@ -461,4 +465,34 @@ model RewardClaim {
   @@index([userId])
   @@index([status])
   @@index([orderId])
+}
+
+// PhoneVerification model for OTP verification
+model PhoneVerification {
+  id          String   @id @default(uuid())
+  phoneNumber String
+  otp         String   // Hashed OTP
+  expiresAt   DateTime
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  createdAt   DateTime @default(now())
+  verifiedAt  DateTime?
+  userId      String?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phoneNumber])
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+// OtpRateLimit model for rate limiting OTP requests
+model OtpRateLimit {
+  id           String   @id @default(uuid())
+  phoneNumber  String
+  requestCount Int      @default(1)
+  windowStart  DateTime @default(now())
+
+  @@unique([phoneNumber, windowStart])
+  @@index([phoneNumber])
 }

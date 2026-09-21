@@ -2,32 +2,56 @@ import bcrypt from 'bcrypt';
 import prisma from '@/database';
 import { generateAuthTokens, verifyRefreshToken, type TokenPayload } from '@/utils';
 import { ApiError, HttpStatus } from '@/types';
+import { OtpService } from './otp.service';
 import type { RegisterInput, LoginInput, RefreshTokenInput } from '@/validators';
 
 const SALT_ROUNDS = 10;
 
 export class AuthService {
-  // Register a new user
+  // Register a new user with phone verification
   static async register(data: RegisterInput) {
     const { email, phone, password, firstName, lastName, role } = data;
 
-    // Check if email already exists
-    const existingEmail = await prisma.user.findUnique({
-      where: { email },
+    // Normalize phone number
+    const normalizedPhone = OtpService.normalizePhoneNumber(phone);
+
+    // Verify phone number has been verified via OTP
+    const recentVerification = await prisma.phoneVerification.findFirst({
+      where: {
+        phoneNumber: normalizedPhone,
+        verifiedAt: {
+          not: null,
+        },
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      orderBy: {
+        verifiedAt: 'desc',
+      },
     });
 
-    if (existingEmail) {
-      throw new ApiError(HttpStatus.CONFLICT, 'Email already registered');
+    if (!recentVerification) {
+      throw new ApiError(HttpStatus.FORBIDDEN, 'Phone number must be verified before registration. Please complete OTP verification.');
     }
 
-    // Check if phone already exists (if provided)
-    if (phone) {
-      const existingPhone = await prisma.user.findUnique({
-        where: { phone },
+    // Check if phone already exists
+    const existingPhone = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    });
+
+    if (existingPhone) {
+      throw new ApiError(HttpStatus.CONFLICT, 'Phone number already registered');
+    }
+
+    // Check if email already exists (if provided)
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({
+        where: { email },
       });
 
-      if (existingPhone) {
-        throw new ApiError(HttpStatus.CONFLICT, 'Phone number already registered');
+      if (existingEmail) {
+        throw new ApiError(HttpStatus.CONFLICT, 'Email already registered');
       }
     }
 
@@ -39,7 +63,9 @@ export class AuthService {
       const user = await tx.user.create({
         data: {
           email,
-          phone,
+          phone: normalizedPhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
           password: hashedPassword,
           firstName,
           lastName,
@@ -53,6 +79,7 @@ export class AuthService {
           lastName: true,
           role: true,
           isActive: true,
+          phoneVerified: true,
           createdAt: true,
         },
       });
@@ -60,7 +87,7 @@ export class AuthService {
       // Generate tokens
       const payload: TokenPayload = {
         userId: user.id,
-        email: user.email,
+        email: user.email || '',
         role: user.role,
       };
 
@@ -88,10 +115,23 @@ export class AuthService {
   static async login(data: LoginInput) {
     const { identifier, password } = data;
 
+    // Normalize identifier if it looks like a phone number
+    let normalizedIdentifier = identifier;
+    if (identifier && identifier.replace(/\D/g, '').length >= 10) {
+      try {
+        normalizedIdentifier = OtpService.normalizePhoneNumber(identifier);
+      } catch {
+        // If normalization fails, use original identifier
+      }
+    }
+
     // Find user by email or phone
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ email: identifier }, { phone: identifier }],
+        OR: [
+          { email: normalizedIdentifier },
+          { phone: normalizedIdentifier },
+        ],
       },
     });
 
@@ -114,7 +154,7 @@ export class AuthService {
     const result = await prisma.$transaction(async (tx) => {
       const payload: TokenPayload = {
         userId: user.id,
-        email: user.email,
+        email: user.email || '',
         role: user.role,
       };
 
@@ -199,7 +239,7 @@ export class AuthService {
     // Generate new tokens
     const tokens = generateAuthTokens({
       userId: tokenRecord.user.id,
-      email: tokenRecord.user.email,
+      email: tokenRecord.user.email || '',
       role: tokenRecord.user.role,
     });
 
@@ -234,6 +274,8 @@ export class AuthService {
         id: true,
         email: true,
         phone: true,
+        phoneVerified: true,
+        phoneVerifiedAt: true,
         firstName: true,
         lastName: true,
         role: true,

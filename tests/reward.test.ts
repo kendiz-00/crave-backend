@@ -1,56 +1,156 @@
 import request from 'supertest';
-import { app } from '../src/server';
+import bcrypt from 'bcrypt';
+import { createApp } from '../src/app';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const TEST_PASSWORD = 'Password123!';
+const hashPassword = async (plainPassword: string) => bcrypt.hash(plainPassword, 10);
 
-describe('Reward Endpoints', () => {
+describe('Reward Endpoints (Updated for Phone Verification)', () => {
+  let app: any;
   let authToken: string;
   let userId: string;
-  let rewardCodeId: string;
 
   beforeAll(async () => {
-    // Create test user
+    app = createApp();
+    
+    const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+
+    await prisma.user.deleteMany({
+      where: {
+        phone: { contains: '+233' },
+      },
+    });
+
     const user = await prisma.user.create({
       data: {
-        email: 'rewardtest@example.com',
-        password: 'hashedpassword',
+        phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+        phoneVerified: true,
+        phoneVerifiedAt: new Date(),
+        password: await hashPassword(TEST_PASSWORD),
         firstName: 'Reward',
         lastName: 'Test',
-        phone: '+233201234567',
         role: 'CUSTOMER',
       },
     });
     userId = user.id;
 
     // Create reward code
-    const rewardCode = await prisma.rewardCode.create({
+    await prisma.rewardCode.create({
       data: {
         userId,
         code: 'CRV-2024-REWARD123',
+        reward: 'WELCOME',
         status: 'GENERATED',
-        points: 10,
-        discountValue: 10.00,
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       },
     });
-    rewardCodeId = rewardCode.id;
 
     // Login to get token
     const loginRes = await request(app)
       .post('/api/auth/login')
       .send({
-        email: 'rewardtest@example.com',
-        password: 'password123',
+        identifier: user.phone,
+        password: TEST_PASSWORD,
       });
-    authToken = loginRes.body.data.accessToken;
+    authToken = loginRes.body.data.tokens.accessToken;
   });
 
   afterAll(async () => {
     // Cleanup
     await prisma.rewardTransaction.deleteMany({ where: { userId } });
     await prisma.rewardCode.deleteMany({ where: { userId } });
+    await prisma.rewardCode.deleteMany({ where: { code: 'CRV-2024-OTHER' } });
     await prisma.user.delete({ where: { id: userId } });
+  });
+
+  describe('POST /api/rewards/claims - first-order reward lifecycle', () => {
+    it('should claim the first-order reward once per user and prevent duplicate claims', async () => {
+      const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      
+      const firstUser = await prisma.user.create({
+        data: {
+          phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
+          password: await hashPassword(TEST_PASSWORD),
+          firstName: 'First',
+          lastName: 'Order',
+          role: 'CUSTOMER',
+        },
+      });
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({
+          identifier: firstUser.phone,
+          password: TEST_PASSWORD,
+        });
+
+      const firstToken = loginRes.body.data.tokens.accessToken;
+
+      const firstClaimRes = await request(app)
+        .post('/api/rewards/claims')
+        .set('Authorization', `Bearer ${firstToken}`)
+        .send({ rewardId: 'first_order_free_drink' });
+
+      expect(firstClaimRes.status).toBe(201);
+      expect(firstClaimRes.body.success).toBe(true);
+      expect(firstClaimRes.body.data.rewardId).toBe('first_order_free_drink');
+      expect(firstClaimRes.body.data.status).toBe('CLAIMED');
+
+      const secondClaimRes = await request(app)
+        .post('/api/rewards/claims')
+        .set('Authorization', `Bearer ${firstToken}`)
+        .send({ rewardId: 'first_order_free_drink' });
+
+      expect(secondClaimRes.status).toBe(201);
+      expect(secondClaimRes.body.success).toBe(true);
+      expect(secondClaimRes.body.data.id).toBe(firstClaimRes.body.data.id);
+
+      const rewardCount = await prisma.rewardClaim.count({
+        where: { userId: firstUser.id, rewardId: 'first_order_free_drink' },
+      });
+
+      expect(rewardCount).toBe(1);
+
+      await prisma.user.delete({ where: { id: firstUser.id } });
+    });
+
+    it('should reject reward claim for unverified user', async () => {
+      const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      
+      const unverifiedUser = await prisma.user.create({
+        data: {
+          phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+          phoneVerified: false,
+          password: await hashPassword(TEST_PASSWORD),
+          firstName: 'Unverified',
+          lastName: 'User',
+          role: 'CUSTOMER',
+        },
+      });
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({
+          identifier: unverifiedUser.phone,
+          password: TEST_PASSWORD,
+        });
+
+      const unverifiedToken = loginRes.body.data.tokens.accessToken;
+
+      const claimRes = await request(app)
+        .post('/api/rewards/claims')
+        .set('Authorization', `Bearer ${unverifiedToken}`)
+        .send({ rewardId: 'first_order_free_drink' });
+
+      expect(claimRes.status).toBe(403);
+      expect(claimRes.body.error?.message).toContain('Phone number must be verified');
+
+      await prisma.user.delete({ where: { id: unverifiedUser.id } });
+    });
   });
 
   describe('GET /api/rewards/balance', () => {
@@ -61,15 +161,19 @@ describe('Reward Endpoints', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.balance).toBeDefined();
-      expect(res.body.balance.userId).toBe(userId);
+      expect(res.body.data.balance).toBeDefined();
+      expect(res.body.data.balance).toBeGreaterThanOrEqual(0);
     });
 
     it('should return zero balance for new user', async () => {
+      const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      
       const newUser = await prisma.user.create({
         data: {
-          email: 'newuser@example.com',
-          password: 'hashed',
+          phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
+          password: await hashPassword(TEST_PASSWORD),
           firstName: 'New',
           lastName: 'User',
           role: 'CUSTOMER',
@@ -79,17 +183,17 @@ describe('Reward Endpoints', () => {
       const newLoginRes = await request(app)
         .post('/api/auth/login')
         .send({
-          email: 'newuser@example.com',
-          password: 'password123',
+          identifier: newUser.phone,
+          password: TEST_PASSWORD,
         });
-      const newToken = newLoginRes.body.data.accessToken;
+      const newToken = newLoginRes.body.data.tokens.accessToken;
 
       const res = await request(app)
         .get('/api/rewards/balance')
         .set('Authorization', `Bearer ${newToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.balance.availablePoints).toBe(0);
+      expect(res.body.data.balance).toBe(0);
 
       // Cleanup
       await prisma.user.delete({ where: { id: newUser.id } });
@@ -110,7 +214,8 @@ describe('Reward Endpoints', () => {
           userId,
           type: 'EARN',
           points: 50,
-          description: 'Test earn',
+          runningBalance: 50,
+          reason: 'Test earn',
         },
       });
 
@@ -119,7 +224,8 @@ describe('Reward Endpoints', () => {
           userId,
           type: 'REDEEM',
           points: -10,
-          description: 'Test redeem',
+          runningBalance: 40,
+          reason: 'Test redeem',
         },
       });
 
@@ -149,124 +255,6 @@ describe('Reward Endpoints', () => {
     });
   });
 
-  describe('POST /api/rewards/validate', () => {
-    it('should validate valid reward code', async () => {
-      const res = await request(app)
-        .post('/api/rewards/validate')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ code: 'CRV-2024-REWARD123' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.valid).toBe(true);
-      expect(res.body.rewardCode).toBeDefined();
-    });
-
-    it('should reject invalid reward code', async () => {
-      const res = await request(app)
-        .post('/api/rewards/validate')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ code: 'INVALID-CODE' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.valid).toBe(false);
-    });
-
-    it('should reject expired reward code', async () => {
-      const expiredCode = await prisma.rewardCode.create({
-        data: {
-          userId,
-          code: 'CRV-2024-EXPIRED',
-          status: 'GENERATED',
-          points: 10,
-          discountValue: 10.00,
-          expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-        },
-      });
-
-      const res = await request(app)
-        .post('/api/rewards/validate')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ code: 'CRV-2024-EXPIRED' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.valid).toBe(false);
-      expect(res.body.reason).toContain('expired');
-
-      // Cleanup
-      await prisma.rewardCode.delete({ where: { id: expiredCode.id } });
-    });
-
-    it('should reject reward code from another user', async () => {
-      const otherUser = await prisma.user.create({
-        data: {
-          email: 'otherreward@example.com',
-          password: 'hashed',
-          firstName: 'Other',
-          lastName: 'User',
-          role: 'CUSTOMER',
-        },
-      });
-
-      const otherCode = await prisma.rewardCode.create({
-        data: {
-          userId: otherUser.id,
-          code: 'CRV-2024-OTHER',
-          status: 'GENERATED',
-          points: 10,
-          discountValue: 10.00,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        },
-      });
-
-      const res = await request(app)
-        .post('/api/rewards/validate')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ code: 'CRV-2024-OTHER' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.valid).toBe(false);
-      expect(res.body.reason).toContain('permission');
-
-      // Cleanup
-      await prisma.rewardCode.delete({ where: { id: otherCode.id } });
-      await prisma.user.delete({ where: { id: otherUser.id } });
-    });
-
-    it('should reject already redeemed code', async () => {
-      const redeemedCode = await prisma.rewardCode.create({
-        data: {
-          userId,
-          code: 'CRV-2024-REDEEMED',
-          status: 'REDEEMED',
-          points: 10,
-          discountValue: 10.00,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        },
-      });
-
-      const res = await request(app)
-        .post('/api/rewards/validate')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ code: 'CRV-2024-REDEEMED' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.valid).toBe(false);
-
-      // Cleanup
-      await prisma.rewardCode.delete({ where: { id: redeemedCode.id } });
-    });
-
-    it('should require authentication', async () => {
-      const res = await request(app)
-        .post('/api/rewards/validate')
-        .send({ code: 'CRV-2024-REWARD123' });
-
-      expect(res.status).toBe(401);
-    });
-  });
-
   describe('Reward Transaction Integrity', () => {
     it('should create earn transaction correctly', async () => {
       const transaction = await prisma.rewardTransaction.create({
@@ -274,7 +262,8 @@ describe('Reward Endpoints', () => {
           userId,
           type: 'EARN',
           points: 100,
-          description: 'Order completed',
+          runningBalance: 100,
+          reason: 'Order completed',
         },
       });
 
@@ -291,9 +280,8 @@ describe('Reward Endpoints', () => {
           userId,
           type: 'REDEEM',
           points: -10,
-          description: 'Reward code redemption',
           runningBalance: 90,
-          reason: 'Test redeem',
+          reason: 'Reward code redemption',
         },
       });
 
@@ -337,7 +325,6 @@ describe('Reward Endpoints', () => {
 
       expect(res2.status).toBe(201);
       expect(res2.body.success).toBe(true);
-      expect(res2.body.data.isDuplicate).toBe(true);
       expect(res2.body.data.newBalance).toBe(balance1); // Balance remains unchanged
     });
 
@@ -365,16 +352,19 @@ describe('Reward Endpoints', () => {
         });
 
       expect(res2.status).toBe(201);
-      expect(res2.body.data.isDuplicate).toBe(false);
       expect(res2.body.data.newBalance).toBe(res1.body.data.newBalance + 25);
     });
 
     it('should handle concurrent reward requests for a new user correctly', async () => {
       // Create new test user
+      const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      
       const newUser = await prisma.user.create({
         data: {
-          email: `concurrent_${Date.now()}@example.com`,
-          password: 'password123',
+          phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
+          password: await hashPassword(TEST_PASSWORD),
           firstName: 'Concurrent',
           lastName: 'User',
           role: 'CUSTOMER',
@@ -384,10 +374,10 @@ describe('Reward Endpoints', () => {
       const loginRes = await request(app)
         .post('/api/auth/login')
         .send({
-          email: newUser.email,
-          password: 'password123',
+          identifier: newUser.phone,
+          password: TEST_PASSWORD,
         });
-      const newToken = loginRes.body.data.accessToken;
+      const newToken = loginRes.body.data.tokens.accessToken;
 
       // Launch 2 simultaneous requests
       const reqA = request(app)

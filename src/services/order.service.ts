@@ -1,11 +1,30 @@
-import { PrismaClient, OrderStatus, PaymentStatus, RewardTransactionType } from '@prisma/client';
+import { PrismaClient, OrderStatus, PaymentStatus, RewardTransactionType, Prisma } from '@prisma/client';
 import { ApiError } from '../types/errors';
 import { CreateOrderInput, UpdateOrderStatusInput, UpdatePaymentStatusInput } from '../validators';
 import { cartService } from './cart.service';
 
 const prisma = new PrismaClient();
 
+const FIRST_ORDER_REWARD_ID = 'first_order_free_drink';
+
 const MILESTONE_CONFIG: Record<string, { points: number; name: string; categories?: string[]; names?: string[] }> = {
+  [FIRST_ORDER_REWARD_ID]: {
+    points: 0,
+    name: 'Free Drink',
+    categories: ['smoothies'],
+    names: [
+      'Strawberry Colada',
+      'Pina Colada',
+      'Watermelon Mint Ice',
+      'Green Glow',
+      'Green Glow Smoothie',
+      'Tropical Fruit Blend',
+      'Pineapple Strawberry',
+      'Strawberries and Cream',
+      'Lemonade Ice',
+      'Banana Peanut Butter Chocolate',
+    ],
+  },
   milestone_free_drink_100: {
     points: 100,
     name: 'Free Drink',
@@ -725,7 +744,7 @@ export class OrderService {
       data: {
         userId,
         orderId,
-        type: type as any,
+        type: type as RewardTransactionType,
         points,
         runningBalance,
         reason,
@@ -866,13 +885,16 @@ export class OrderService {
       throw new ApiError(400, 'Invalid or unknown reward milestone ID');
     }
 
-    // Check user's current points balance
-    const currentBalance = await this.getUserRewardBalance(userId);
-    if (currentBalance < milestoneConfig.points) {
-      throw new ApiError(400, `Insufficient points balance. ${milestoneConfig.points} points required to claim ${milestoneConfig.name}.`);
+    // Check if user's phone is verified
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { phoneVerified: true, phone: true },
+    });
+
+    if (!user || !user.phoneVerified) {
+      throw new ApiError(403, 'Phone number must be verified to claim rewards. Please complete phone verification first.');
     }
 
-    // Check if user already claimed this milestone reward
     const existingClaim = await prisma.rewardClaim.findUnique({
       where: {
         userId_rewardId: {
@@ -886,6 +908,48 @@ export class OrderService {
       return existingClaim;
     }
 
+    if (rewardId === FIRST_ORDER_REWARD_ID) {
+      const hasPlacedOrder = await prisma.order.findFirst({
+        where: { userId },
+        select: { id: true },
+      });
+
+      if (hasPlacedOrder) {
+        throw new ApiError(400, 'The first-order reward is only available to customers who have not placed an order yet.');
+      }
+
+      try {
+        const claim = await prisma.rewardClaim.create({
+          data: {
+            userId,
+            rewardId,
+            status: 'CLAIMED',
+          },
+        });
+
+        return claim;
+      } catch (error: unknown) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          const claim = await prisma.rewardClaim.findUnique({
+            where: {
+              userId_rewardId: {
+                userId,
+                rewardId,
+              },
+            },
+          });
+          if (claim) return claim;
+        }
+        throw error;
+      }
+    }
+
+    // Check user's current points balance for points-based rewards
+    const currentBalance = await this.getUserRewardBalance(userId);
+    if (currentBalance < milestoneConfig.points) {
+      throw new ApiError(400, `Insufficient points balance. ${milestoneConfig.points} points required to claim ${milestoneConfig.name}.`);
+    }
+
     // Create persistent claim in PostgreSQL (idempotent / concurrency safe via unique constraint)
     try {
       const claim = await prisma.rewardClaim.create({
@@ -897,9 +961,9 @@ export class OrderService {
       });
 
       return claim;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Handle unique constraint race condition
-      if (error?.code === 'P2002') {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const claim = await prisma.rewardClaim.findUnique({
           where: {
             userId_rewardId: {
@@ -973,7 +1037,7 @@ export class OrderService {
     return prisma.$transaction(async (tx) => {
       // Check for duplicate transaction via orderId or referenceId ONLY if provided
       if (referenceId || orderId) {
-        const orConditions: any[] = [];
+        const orConditions: Prisma.RewardTransactionWhereInput[] = [];
         if (referenceId) {
           orConditions.push({ referenceId });
         }
@@ -1035,7 +1099,7 @@ export class OrderService {
           userId,
           orderId: orderId || null,
           referenceId: referenceId || null,
-          type: type as any,
+          type: type as RewardTransactionType,
           points,
           runningBalance: newBalance,
           reason,
