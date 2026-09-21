@@ -37,7 +37,21 @@ services:
         sync: false
       - key: PAYSTACK_WEBHOOK_SECRET
         sync: false
-      
+
+      # SMS/OTP Configuration
+      - key: SMS_PROVIDER
+        value: africas_talking
+      - key: AFRICAS_TALKING_USERNAME
+        sync: false
+      - key: AFRICAS_TALKING_API_KEY
+        sync: false
+      - key: OTP_EXPIRY_MINUTES
+        value: 10
+      - key: OTP_MAX_ATTEMPTS
+        value: 3
+      - key: OTP_RESEND_COOLDOWN_SECONDS
+        value: 60
+
       # CORS Configuration
       - key: CORS_ALLOWED_ORIGINS
         value: https://crave-frontend.vercel.app,https://crave-staging.vercel.app,https://crave.vercel.app,https://crave.com
