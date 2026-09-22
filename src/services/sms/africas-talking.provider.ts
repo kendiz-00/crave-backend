@@ -40,12 +40,42 @@ export class AfricasTalkingProvider implements SmsProvider {
         }),
       });
 
+      // Safely handle response - check content type before parsing
+      const contentType = response.headers.get('content-type');
+      const responseText = await response.text();
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Africa's Talking API error: ${JSON.stringify(errorData)}`);
+        // Handle error responses safely
+        let errorMessage = `Africa's Talking API error: HTTP ${response.status}`;
+        
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            const errorData = JSON.parse(responseText);
+            errorMessage += ` - ${JSON.stringify(errorData)}`;
+          } catch {
+            // If JSON parsing fails, use the raw text
+            errorMessage += ` - ${responseText.substring(0, 200)}`;
+          }
+        } else {
+          // Non-JSON error response
+          errorMessage += ` - ${responseText.substring(0, 200)}`;
+        }
+        
+        throw new Error(errorMessage);
       }
 
-      const data = await response.json() as any;
+      // Handle success responses safely
+      let data: any;
+      if (contentType && contentType.includes('application/json')) {
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error(`Invalid JSON response from Africa's Talking: ${responseText.substring(0, 200)}`);
+        }
+      } else {
+        // Unexpected non-JSON success response
+        throw new Error(`Unexpected response format from Africa's Talking: ${responseText.substring(0, 200)}`);
+      }
       
       if (data.SMSMessageData?.Recipients?.[0]?.status !== 'Success') {
         throw new Error(`SMS delivery failed: ${JSON.stringify(data)}`);
