@@ -1,8 +1,7 @@
-import { PrismaClient, CartStatus } from '@prisma/client';
+import { CartStatus } from '@prisma/client';
 import { ApiError } from '../types/errors';
 import { CartItemInput, CreateCartInput, UpdateCartItemInput } from '../validators';
-
-const prisma = new PrismaClient();
+import prisma from '@/database';
 
 export class CartService {
   /**

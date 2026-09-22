@@ -1,9 +1,8 @@
-import { PrismaClient, OrderStatus, PaymentStatus, RewardTransactionType, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentStatus, RewardTransactionType, Prisma } from '@prisma/client';
 import { ApiError } from '../types/errors';
 import { CreateOrderInput, UpdateOrderStatusInput, UpdatePaymentStatusInput } from '../validators';
 import { cartService } from './cart.service';
-
-const prisma = new PrismaClient();
+import prisma from '@/database';
 
 const FIRST_ORDER_REWARD_ID = 'first_order_free_drink';
 
