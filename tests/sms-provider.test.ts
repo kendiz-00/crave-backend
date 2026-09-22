@@ -52,6 +52,10 @@ describe('Africa\'s Talking SMS Provider - Response Handling', () => {
 
       await expect(provider.sendOtp('+233241234567', '123456')).resolves.not.toThrow();
       expect(mockFetch).toHaveBeenCalledTimes(1);
+      
+      // Verify API key header is included
+      const fetchCall = mockFetch.mock.calls[0];
+      expect(fetchCall[1].headers.ApiKey).toBe('testkey');
     });
 
     it('should handle queued message status', async () => {
@@ -79,6 +83,10 @@ describe('Africa\'s Talking SMS Provider - Response Handling', () => {
       });
 
       await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow('SMS delivery failed');
+      
+      // Verify API key header is included
+      const fetchCall = mockFetch.mock.calls[0];
+      expect(fetchCall[1].headers.ApiKey).toBe('testkey');
     });
   });
 
@@ -100,6 +108,10 @@ describe('Africa\'s Talking SMS Provider - Response Handling', () => {
       });
 
       await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow("Africa's Talking API error: HTTP 401");
+      
+      // Verify API key header was sent (even if invalid)
+      const fetchCall = mockFetch.mock.calls[0];
+      expect(fetchCall[1].headers.ApiKey).toBe('testkey');
     });
 
     it('should handle 400 Bad Request JSON error response', async () => {
@@ -220,6 +232,86 @@ describe('Africa\'s Talking SMS Provider - Response Handling', () => {
       const providerNoCreds = new AfricasTalkingProvider();
 
       await expect(providerNoCreds.sendOtp('+233241234567', '123456')).rejects.toThrow('Africa\'s Talking credentials not configured');
+    });
+  });
+
+  describe('Authentication mechanism', () => {
+    it('should include ApiKey header in request', async () => {
+      const successResponse = {
+        SMSMessageData: {
+          Message: 'Sent to 1/1 Total Cost: KES 0.8000',
+          Recipients: [{
+            statusCode: 101,
+            number: '+233241234567',
+            status: 'Success',
+            cost: 'KES 0.8000',
+            messageId: 'ATXid_12345'
+          }]
+        }
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(successResponse),
+        json: async () => successResponse
+      });
+
+      await provider.sendOtp('+233241234567', '123456');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.africastalking.com/version1/messaging',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'ApiKey': 'testkey',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+          })
+        })
+      );
+    });
+
+    it('should include username in request body', async () => {
+      const successResponse = {
+        SMSMessageData: {
+          Message: 'Sent to 1/1 Total Cost: KES 0.8000',
+          Recipients: [{
+            statusCode: 101,
+            number: '+233241234567',
+            status: 'Success',
+            cost: 'KES 0.8000',
+            messageId: 'ATXid_12345'
+          }]
+        }
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(successResponse),
+        json: async () => successResponse
+      });
+
+      await provider.sendOtp('+233241234567', '123456');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const fetchCall = mockFetch.mock.calls[0];
+      const body = fetchCall[1].body;
+      
+      // Convert URLSearchParams to string for checking
+      const bodyString = body instanceof URLSearchParams ? body.toString() : body;
+      
+      expect(bodyString).toContain('username=testuser');
+      expect(bodyString).toContain('to=%2B233241234567');
+      expect(bodyString).toContain('from=CRAVE');
     });
   });
 });

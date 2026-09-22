@@ -31,6 +31,7 @@ export class AfricasTalkingProvider implements SmsProvider {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
+          'ApiKey': this.apiKey, // Africa's Talking requires API key in header
         },
         body: new URLSearchParams({
           username: this.username,
