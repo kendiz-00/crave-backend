@@ -13,6 +13,16 @@ export class AfricasTalkingProvider implements SmsProvider {
     this.username = process.env.AFRICAS_TALKING_USERNAME || '';
     this.apiKey = process.env.AFRICAS_TALKING_API_KEY || '';
 
+    // Safe diagnostic logging without exposing actual credentials
+    console.log('Africa\'s Talking credentials diagnostic:', {
+      usernameConfigured: !!this.username,
+      usernameLength: this.username.length,
+      apiKeyConfigured: !!this.apiKey,
+      apiKeyLength: this.apiKey.length,
+      smsProvider: process.env.SMS_PROVIDER,
+      endpoint: 'https://api.africastalking.com/version1/messaging'
+    });
+
     if (!this.username || !this.apiKey) {
       console.warn('Africa\'s Talking credentials not configured. SMS sending will fail.');
     }
