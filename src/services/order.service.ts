@@ -215,6 +215,16 @@ export class OrderService {
         throw new ApiError(400, `Your cart does not contain an item eligible for ${milestoneConfig.name}`);
       }
 
+      if (claim.rewardId === FIRST_ORDER_REWARD_ID) {
+        // Ensure cart contains at least one non-complimentary item / qualifying meal
+        const hasQualifyingMeal = cart.items.some(
+          (item: { menuItemId: string; quantity: number }) => item.menuItemId !== eligibleItem.menuItemId || item.quantity > 1
+        );
+        if (!hasQualifyingMeal) {
+          throw new ApiError(400, 'A qualifying meal is required in your cart to claim your free drink.');
+        }
+      }
+
       // Calculate authoritative discount (price of 1 unit of eligible item)
       rewardDiscount = Number(eligibleItem.menuItem.price);
       validClaimToRedeem = claim;
@@ -632,6 +642,20 @@ export class OrderService {
         throw new ApiError(400, `Cannot transition from ${order.status} to ${data.status}`);
       }
 
+      if (data.status === OrderStatus.CANCELLED) {
+        await tx.rewardClaim.updateMany({
+          where: {
+            orderId: orderId,
+            status: 'REDEEMED',
+          },
+          data: {
+            status: 'CLAIMED',
+            redeemedAt: null,
+            orderId: null,
+          },
+        });
+      }
+
       return tx.order.update({
         where: { id: orderId },
         data: { status: data.status },
@@ -662,6 +686,20 @@ export class OrderService {
 
       if (!order) {
         throw new ApiError(404, 'Order not found');
+      }
+
+      if (data.paymentStatus === PaymentStatus.FAILED) {
+        await tx.rewardClaim.updateMany({
+          where: {
+            orderId: orderId,
+            status: 'REDEEMED',
+          },
+          data: {
+            status: 'CLAIMED',
+            redeemedAt: null,
+            orderId: null,
+          },
+        });
       }
 
       return tx.order.update({
@@ -884,14 +922,16 @@ export class OrderService {
       throw new ApiError(400, 'Invalid or unknown reward milestone ID');
     }
 
-    // Check if user's phone is verified
+    // Check if user's phone is verified (required for point-based milestone rewards, but bypassed for first-order reward)
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { phoneVerified: true, phone: true },
     });
 
-    if (!user || !user.phoneVerified) {
-      throw new ApiError(403, 'Phone number must be verified to claim rewards. Please complete phone verification first.');
+    if (rewardId !== FIRST_ORDER_REWARD_ID) {
+      if (!user || !user.phoneVerified) {
+        throw new ApiError(403, 'Phone number must be verified to claim rewards. Please complete phone verification first.');
+      }
     }
 
     const existingClaim = await prisma.rewardClaim.findUnique({
@@ -909,12 +949,16 @@ export class OrderService {
 
     if (rewardId === FIRST_ORDER_REWARD_ID) {
       const hasPlacedOrder = await prisma.order.findFirst({
-        where: { userId },
+        where: {
+          userId,
+          status: { notIn: [OrderStatus.CANCELLED, OrderStatus.REFUNDED] },
+          paymentStatus: { not: PaymentStatus.FAILED },
+        },
         select: { id: true },
       });
 
       if (hasPlacedOrder) {
-        throw new ApiError(400, 'The first-order reward is only available to customers who have not placed an order yet.');
+        throw new ApiError(400, 'The first-order reward is only available to customers who have not placed a qualifying order yet.');
       }
 
       try {
