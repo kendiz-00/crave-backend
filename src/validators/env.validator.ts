@@ -11,8 +11,8 @@ const envSchema = z.object({
   PAYSTACK_PUBLIC_KEY: z.string().startsWith('pk_').optional(),
   PAYSTACK_SECRET_KEY: z.string().startsWith('sk_').optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
-  CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
-  CLIENT_URL: z.string().url().optional().default('http://localhost:3000'),
+  CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:3000,https://craveghana.com,https://www.craveghana.com,https://crave-frontend.vercel.app'),
+  CLIENT_URL: z.string().url().optional().default('https://craveghana.com'),
   RATE_LIMIT_WINDOW_MS: z
     .string()
     .transform((val) => parseInt(val, 10))

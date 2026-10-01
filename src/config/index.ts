@@ -2,6 +2,16 @@ import { validateEnv } from '@/validators/env.validator';
 
 const env = validateEnv();
 
+const defaultAllowedOrigins = [
+  'https://craveghana.com',
+  'https://www.craveghana.com',
+  'https://crave-frontend.vercel.app',
+];
+
+const configuredOrigins = env.CORS_ALLOWED_ORIGINS.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 export const config = {
   port: env.PORT,
   database: {
@@ -12,8 +22,8 @@ export const config = {
   },
   nodeEnv: env.NODE_ENV,
   cors: {
-    allowedOrigins: env.CORS_ALLOWED_ORIGINS.split(',').map((origin) =>
-      origin.trim()
+    allowedOrigins: Array.from(
+      new Set([...defaultAllowedOrigins, ...configuredOrigins])
     ),
   },
   rateLimit: {
