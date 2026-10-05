@@ -9,6 +9,10 @@ router.get('/db-info', asyncHandler(async (_req, res) => {
   try {
     const dbUrl = process.env.DATABASE_URL || 'NOT SET';
     const maskedUrl = dbUrl.replace(/:[^:@]+@/, ':****@');
+    
+    // Extract database name from URL
+    const dbNameMatch = dbUrl.match(/\/([^?]+)(\?|$)/);
+    const dbName = dbNameMatch ? dbNameMatch[1] : 'UNKNOWN';
 
     const categoryCount = await prisma.category.count();
     const productCount = await prisma.menuItem.count({ where: { isDeleted: false } });
@@ -39,6 +43,7 @@ router.get('/db-info', asyncHandler(async (_req, res) => {
 
     res.json({
       databaseUrl: maskedUrl,
+      databaseName: dbName,
       categories: categoryCount,
       products: productCount,
       phase2bProducts: phase2bFound,
