@@ -107,4 +107,24 @@ router.get('/menu-raw', asyncHandler(async (_req, res) => {
   }
 }));
 
+// Get category IDs for Phase 2B compatibility check
+router.get('/categories', asyncHandler(async (_req, res) => {
+  try {
+    const categories = await prisma.category.findMany({
+      select: { id: true, name: true, slug: true, isActive: true, sortOrder: true },
+      orderBy: { sortOrder: 'asc' }
+    });
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      requestId: Math.random().toString(36).substring(2, 15),
+      categories: categories
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message
+    });
+  }
+}));
+
 export default router;
