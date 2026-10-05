@@ -5,7 +5,7 @@ import { asyncHandler } from '@/middleware/asyncHandler';
 const router = Router();
 
 // Temporary diagnostic endpoint - REMOVE IN PRODUCTION
-router.get('/debug/db-info', asyncHandler(async (_req, res) => {
+router.get('/db-info', asyncHandler(async (_req, res) => {
   try {
     const dbUrl = process.env.DATABASE_URL || 'NOT SET';
     const maskedUrl = dbUrl.replace(/:[^:@]+@/, ':****@');
