@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '@/database';
 import { asyncHandler } from '@/middleware/asyncHandler';
+import { cleanExpiredCache } from '@/middleware/cache.middleware';
 
 const router = Router();
 
@@ -55,7 +56,7 @@ router.get('/db-info', asyncHandler(async (_req, res) => {
       requestId: Math.random().toString(36).substring(2, 15),
       databaseUrl: maskedUrl,
       databaseName: dbName,
-      databaseInfo: dbInfo[0],
+      databaseInfo: (dbInfo as any)[0],
       categories: categoryCount,
       products: productCount,
       phase2bProducts: phase2bFound,
@@ -72,6 +73,9 @@ router.get('/db-info', asyncHandler(async (_req, res) => {
 // Bypass cache - directly query database like /api/menu does
 router.get('/menu-raw', asyncHandler(async (_req, res) => {
   try {
+    // Force clean cache before querying
+    cleanExpiredCache();
+
     const products = await prisma.menuItem.findMany({
       where: { isDeleted: false },
       include: { category: true },
