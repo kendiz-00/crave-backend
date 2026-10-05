@@ -14,6 +14,15 @@ router.get('/db-info', asyncHandler(async (_req, res) => {
     const dbNameMatch = dbUrl.match(/\/([^?]+)(\?|$)/);
     const dbName = dbNameMatch ? dbNameMatch[1] : 'UNKNOWN';
 
+    // Get database-level info
+    const dbInfo = await prisma.$queryRaw`
+      SELECT 
+        current_database(),
+        current_schema(),
+        current_user,
+        current_setting('search_path')
+    `;
+
     const categoryCount = await prisma.category.count();
     const productCount = await prisma.menuItem.count({ where: { isDeleted: false } });
 
@@ -42,8 +51,11 @@ router.get('/db-info', asyncHandler(async (_req, res) => {
     });
 
     res.json({
+      timestamp: new Date().toISOString(),
+      requestId: Math.random().toString(36).substring(2, 15),
       databaseUrl: maskedUrl,
       databaseName: dbName,
+      databaseInfo: dbInfo[0],
       categories: categoryCount,
       products: productCount,
       phase2bProducts: phase2bFound,
@@ -53,6 +65,40 @@ router.get('/db-info', asyncHandler(async (_req, res) => {
     res.status(500).json({
       error: error.message,
       databaseUrl: process.env.DATABASE_URL ? 'SET' : 'NOT SET'
+    });
+  }
+}));
+
+// Bypass cache - directly query database like /api/menu does
+router.get('/menu-raw', asyncHandler(async (_req, res) => {
+  try {
+    const products = await prisma.menuItem.findMany({
+      where: { isDeleted: false },
+      include: { category: true },
+      orderBy: { sortOrder: 'asc' }
+    });
+
+    const categories = await prisma.category.findMany({
+      where: { isActive: true },
+      orderBy: { sortOrder: 'asc' }
+    });
+
+    const productNames = products.map(p => p.name);
+    const first5 = productNames.slice(0, 5);
+    const last5 = productNames.slice(-5);
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      requestId: Math.random().toString(36).substring(2, 15),
+      bypassedCache: true,
+      totalProducts: products.length,
+      totalCategories: categories.length,
+      first5ProductNames: first5,
+      last5ProductNames: last5
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message
     });
   }
 }));
