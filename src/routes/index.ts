@@ -10,6 +10,7 @@ import orderRoute from '@/routes/order.route';
 import rewardRoute from '@/routes/reward.route';
 import paymentRoute from '@/routes/payment.route';
 import seedRoutes from "./seed.route";
+import debugRoute from '@/routes/debug.route';
 
 const router = Router();
 
@@ -24,5 +25,6 @@ router.use('/api/orders', orderRoute);
 router.use('/api/rewards', rewardRoute);
 router.use('/api/payments', paymentRoute);
 router.use("/seed", seedRoutes);
+router.use('/debug', debugRoute);
 
 export default router;
