@@ -41,17 +41,18 @@ COPY prisma ./prisma/
 RUN npm ci --omit=dev && \
     npm cache clean --force
 
+# Install ts-node and typescript for Phase 2A migration
+RUN npm install --save-exact ts-node@10.9.2 typescript@5.5.4
+
 # Copy built application and Prisma artifacts from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
-# Copy migration script and ts-node dependencies for Phase 2A
+# Copy migration script and tsconfig.json for Phase 2A
 COPY --from=builder --chown=nodejs:nodejs /app/migrations ./migrations
 COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./tsconfig.json
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules/ts-node ./node_modules/ts-node
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules/typescript ./node_modules/typescript
 
 # Switch to non-root user
 USER nodejs
