@@ -41,18 +41,11 @@ COPY prisma ./prisma/
 RUN npm ci --omit=dev && \
     npm cache clean --force
 
-# Install ts-node and typescript for one-time image path fix
-RUN npm install --save-exact ts-node@10.9.2 typescript@5.5.4
-
 # Copy built application and Prisma artifacts from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
-
-# Copy fix script and tsconfig.json for one-time image path fix
-COPY --from=builder --chown=nodejs:nodejs /app/migrations ./migrations
-COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./tsconfig.json
 
 # Switch to non-root user
 USER nodejs
@@ -67,5 +60,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Conditionally run image path fix, then Prisma migrations, then start application
-CMD ["sh", "-c", "if [ \"$RUN_FIX_IMAGE_PATHS\" = \"true\" ]; then npx ts-node migrations/fix-image-paths.ts || exit 1; fi && NODE_ENV=production npx prisma migrate deploy && node dist/server.js"]
+# Run migrations and start application
+CMD ["sh", "-c", "NODE_ENV=production npx prisma migrate deploy && node dist/server.js"]
