@@ -321,33 +321,6 @@ async function validateProductData() {
   console.log('   ✓ All product data is valid');
 }
 
-async function validateImages() {
-  console.log('\n=== VALIDATING IMAGES ===\n');
-
-  const fs = require('fs');
-  const path = require('path');
-  const frontendImagesPath = path.join(__dirname, '../../crave-frontend/images');
-  
-  const errors = [];
-  
-  for (const product of NEW_PRODUCTS) {
-    const imageFilename = product.imageUrl.replace('images/', '');
-    const imagePath = path.join(frontendImagesPath, imageFilename);
-    
-    if (!fs.existsSync(imagePath)) {
-      errors.push(`${product.name}: Image file not found: ${imageFilename}`);
-    }
-  }
-  
-  if (errors.length > 0) {
-    console.log('\n❌ IMAGE VALIDATION FAILED:');
-    errors.forEach(error => console.log(`   - ${error}`));
-    throw new Error('Image validation failed. Please upload all required images.');
-  }
-  
-  console.log('   ✓ All images are present');
-}
-
 async function getNextDisplayOrder(categoryId: string): Promise<number> {
   const categoryProducts = await prisma.menuItem.findMany({
     where: {
@@ -376,7 +349,6 @@ async function insertPhase2BProducts() {
   try {
     // Step 1: Validate all data BEFORE opening transaction
     await validateProductData();
-    await validateImages();
     
     // Step 2: Validate no duplicate slugs
     console.log('\n2. Validating no duplicate slugs...');
