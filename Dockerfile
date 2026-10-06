@@ -67,5 +67,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Conditionally run Phase 2A migration, then Prisma migrations, then start application
-CMD ["sh", "-c", "if [ \"$RUN_PHASE2A_MIGRATION\" = \"true\" ]; then npx ts-node migrations/phase2a-menu-reorganization.ts || exit 1; fi && NODE_ENV=production npx prisma migrate deploy && node dist/server.js"]
+# Conditionally run Phase 2A/2B migrations, then Prisma migrations, then start application
+CMD ["sh", "-c", "if [ \"$RUN_PHASE2A_MIGRATION\" = \"true\" ]; then npx ts-node migrations/phase2a-menu-reorganization.ts || exit 1; fi && if [ \"$RUN_PHASE2B_MIGRATION\" = \"true\" ]; then npx ts-node migrations/phase2b-insert-products-template.ts || exit 1; fi && NODE_ENV=production npx prisma migrate deploy && node dist/server.js"]
