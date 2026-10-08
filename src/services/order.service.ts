@@ -322,7 +322,8 @@ export class OrderService {
         });
       }
 
-      // Mark milestone reward claim as redeemed if applicable
+      // Link the claimed reward to the pending order. Redemption occurs only after
+      // the payment is successfully verified, keeping failed checkouts reusable.
       if (validClaimToRedeem) {
         const claimUpdate = await tx.rewardClaim.updateMany({
           where: {
@@ -331,8 +332,6 @@ export class OrderService {
             status: 'CLAIMED',
           },
           data: {
-            status: 'REDEEMED',
-            redeemedAt: new Date(),
             orderId: newOrder.id,
           },
         });
@@ -928,10 +927,8 @@ export class OrderService {
       select: { phoneVerified: true, phone: true },
     });
 
-    if (rewardId !== FIRST_ORDER_REWARD_ID) {
-      if (!user || !user.phoneVerified) {
-        throw new ApiError(403, 'Phone number must be verified to claim rewards. Please complete phone verification first.');
-      }
+    if (!user || !user.phoneVerified) {
+      throw new ApiError(403, 'Phone number must be verified to claim rewards. Please complete phone verification first.');
     }
 
     const existingClaim = await prisma.rewardClaim.findUnique({

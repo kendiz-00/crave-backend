@@ -151,6 +151,188 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
 
       await prisma.user.delete({ where: { id: unverifiedUser.id } });
     });
+
+    it('should keep the first-order reward claimed after failed payment', async () => {
+      const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      const failedPaymentUser = await prisma.user.create({
+        data: {
+          phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
+          password: await hashPassword(TEST_PASSWORD),
+          firstName: 'Failed',
+          lastName: 'Payment',
+          role: 'CUSTOMER',
+        },
+      });
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ identifier: failedPaymentUser.phone, password: TEST_PASSWORD });
+      const failedPaymentToken = loginRes.body.data.tokens.accessToken;
+
+      const claimRes = await request(app)
+        .post('/api/rewards/claims')
+        .set('Authorization', `Bearer ${failedPaymentToken}`)
+        .send({ rewardId: 'first_order_free_drink' });
+      expect(claimRes.status).toBe(201);
+
+      const order = await prisma.order.create({
+        data: {
+          userId: failedPaymentUser.id,
+          orderNumber: `CRV-FAILED-${Date.now()}`,
+          status: 'PENDING',
+          paymentStatus: 'PENDING',
+          orderType: 'PICKUP',
+          subtotal: 20,
+          discount: 0,
+          tax: 1,
+          deliveryFee: 0,
+          grandTotal: 21,
+          customerName: 'Failed Payment User',
+          customerPhone: failedPaymentUser.phone || '',
+        },
+      });
+      await prisma.rewardClaim.update({
+        where: { id: claimRes.body.data.id },
+        data: { orderId: order.id },
+      });
+      await prisma.payment.create({
+        data: {
+          orderId: order.id,
+          reference: 'FAILED_REWARD_PAYMENT',
+          amount: 21,
+          currency: 'GHS',
+          method: 'MOBILE_MONEY',
+          gateway: 'PAYSTACK',
+          status: 'PENDING',
+        },
+      });
+
+      const originalFetch = global.fetch;
+      const originalSecret = process.env.PAYSTACK_SECRET_KEY;
+      process.env.PAYSTACK_SECRET_KEY = 'test-secret-key';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ status: false, message: 'Payment failed' }),
+      }) as typeof fetch;
+
+      try {
+        const verifyRes = await request(app)
+          .post('/api/payments/verify')
+          .set('Authorization', `Bearer ${failedPaymentToken}`)
+          .send({ reference: 'FAILED_REWARD_PAYMENT' });
+
+        expect(verifyRes.status).toBe(400);
+        const claim = await prisma.rewardClaim.findUnique({ where: { id: claimRes.body.data.id } });
+        expect(claim?.status).toBe('CLAIMED');
+        expect(claim?.orderId).toBe(order.id);
+      } finally {
+        global.fetch = originalFetch;
+        if (originalSecret === undefined) {
+          delete process.env.PAYSTACK_SECRET_KEY;
+        } else {
+          process.env.PAYSTACK_SECRET_KEY = originalSecret;
+        }
+        await prisma.payment.deleteMany({ where: { reference: 'FAILED_REWARD_PAYMENT' } });
+        await prisma.order.deleteMany({ where: { id: order.id } });
+        await prisma.user.delete({ where: { id: failedPaymentUser.id } });
+      }
+    });
+
+    it('should redeem the linked claim only after successful payment', async () => {
+      const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      const successfulPaymentUser = await prisma.user.create({
+        data: {
+          phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
+          password: await hashPassword(TEST_PASSWORD),
+          firstName: 'Successful',
+          lastName: 'Payment',
+          role: 'CUSTOMER',
+        },
+      });
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ identifier: successfulPaymentUser.phone, password: TEST_PASSWORD });
+      const successfulPaymentToken = loginRes.body.data.tokens.accessToken;
+
+      const claimRes = await request(app)
+        .post('/api/rewards/claims')
+        .set('Authorization', `Bearer ${successfulPaymentToken}`)
+        .send({ rewardId: 'first_order_free_drink' });
+      expect(claimRes.status).toBe(201);
+
+      const order = await prisma.order.create({
+        data: {
+          userId: successfulPaymentUser.id,
+          orderNumber: `CRV-SUCCESS-${Date.now()}`,
+          status: 'PENDING',
+          paymentStatus: 'PENDING',
+          orderType: 'PICKUP',
+          subtotal: 20,
+          discount: 0,
+          tax: 1,
+          deliveryFee: 0,
+          grandTotal: 21,
+          customerName: 'Successful Payment User',
+          customerPhone: successfulPaymentUser.phone || '',
+        },
+      });
+      await prisma.rewardClaim.update({
+        where: { id: claimRes.body.data.id },
+        data: { orderId: order.id },
+      });
+      await prisma.payment.create({
+        data: {
+          orderId: order.id,
+          reference: 'SUCCESSFUL_REWARD_PAYMENT',
+          amount: 21,
+          currency: 'GHS',
+          method: 'MOBILE_MONEY',
+          gateway: 'PAYSTACK',
+          status: 'PENDING',
+        },
+      });
+
+      const originalFetch = global.fetch;
+      const originalSecret = process.env.PAYSTACK_SECRET_KEY;
+      process.env.PAYSTACK_SECRET_KEY = 'test-secret-key';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ status: true, message: 'Payment successful', data: { reference: 'SUCCESSFUL_REWARD_PAYMENT' } }),
+      }) as typeof fetch;
+
+      try {
+        const verifyRes = await request(app)
+          .post('/api/payments/verify')
+          .set('Authorization', `Bearer ${successfulPaymentToken}`)
+          .send({ reference: 'SUCCESSFUL_REWARD_PAYMENT' });
+
+        expect(verifyRes.status).toBe(200);
+        const claim = await prisma.rewardClaim.findUnique({ where: { id: claimRes.body.data.id } });
+        expect(claim?.status).toBe('REDEEMED');
+        expect(claim?.redeemedAt).not.toBeNull();
+        expect(claim?.orderId).toBe(order.id);
+
+        const duplicateRes = await request(app)
+          .post('/api/payments/verify')
+          .set('Authorization', `Bearer ${successfulPaymentToken}`)
+          .send({ reference: 'SUCCESSFUL_REWARD_PAYMENT' });
+        expect(duplicateRes.status).toBe(200);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+      } finally {
+        global.fetch = originalFetch;
+        if (originalSecret === undefined) {
+          delete process.env.PAYSTACK_SECRET_KEY;
+        } else {
+          process.env.PAYSTACK_SECRET_KEY = originalSecret;
+        }
+        await prisma.payment.deleteMany({ where: { reference: 'SUCCESSFUL_REWARD_PAYMENT' } });
+        await prisma.order.deleteMany({ where: { id: order.id } });
+        await prisma.user.delete({ where: { id: successfulPaymentUser.id } });
+      }
+    });
   });
 
   describe('GET /api/rewards/balance', () => {

@@ -1,4 +1,4 @@
-import { PaymentMethod, PaymentGateway, PaymentStatus } from '@prisma/client';
+import { PaymentMethod, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
 import { ApiError } from '../types/errors';
 import prisma from '@/database';
 
@@ -62,7 +62,7 @@ export class PaymentService {
    * Verify payment with Paystack
    * Uses transaction to prevent race conditions and duplicate payments
    */
-  async verifyPayment(reference: string) {
+  async verifyPayment(reference: string, userId?: string) {
     // Use transaction to prevent race conditions
     return prisma.$transaction(async (tx) => {
       // Fetch payment from database with lock
@@ -75,8 +75,14 @@ export class PaymentService {
         throw new ApiError(404, 'Payment not found');
       }
 
-      // If already verified, return existing payment (idempotent)
+      if (userId && payment.order.userId !== userId) {
+        throw new ApiError(403, 'You do not have permission to verify this payment');
+      }
+
+      // If already verified, return existing payment and complete any deferred claim
+      // transition from an earlier deployment or retry.
       if (payment.status === PaymentStatus.PAID) {
+        await this.redeemOrderClaims(tx, payment.orderId);
         return payment;
       }
 
@@ -87,7 +93,7 @@ export class PaymentService {
         throw new ApiError(400, 'Payment verification failed');
       }
 
-      // Update payment status and order payment status atomically
+      // Update payment status, order payment status, and claim state atomically.
       const updatedPayment = await tx.payment.update({
         where: { id: payment.id },
         data: {
@@ -104,6 +110,7 @@ export class PaymentService {
           status: 'CONFIRMED',
         },
       });
+      await this.redeemOrderClaims(tx, payment.orderId);
 
       return updatedPayment;
     });
@@ -171,6 +178,7 @@ export class PaymentService {
           status: 'CONFIRMED',
         },
       });
+      await this.redeemOrderClaims(tx, payment.orderId);
     });
   }
 
@@ -215,6 +223,33 @@ export class PaymentService {
   private async handleFailedTransfer(data: unknown) {
     // Implement failed refund handling if needed
     console.log('Transfer failed:', data);
+  }
+
+  /**
+   * Redeem all claimed rewards linked to a paid order. The update is atomic with
+   * the payment transition so failed payments cannot consume a reward.
+   */
+  private async redeemOrderClaims(tx: Prisma.TransactionClient, orderId: string) {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true },
+    });
+
+    if (!order) {
+      throw new ApiError(404, 'Order not found');
+    }
+
+    await tx.rewardClaim.updateMany({
+      where: {
+        orderId,
+        userId: order.userId,
+        status: 'CLAIMED',
+      },
+      data: {
+        status: 'REDEEMED',
+        redeemedAt: new Date(),
+      },
+    });
   }
 
   /**

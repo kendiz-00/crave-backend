@@ -46,7 +46,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const validatedData = verifyPaymentSchema.parse(req.body);
 
-    const payment = await paymentService.verifyPayment(validatedData.reference);
+    const payment = await paymentService.verifyPayment(
+      validatedData.reference,
+      req.user?.userId
+    );
 
     res.json({
       success: true,
