@@ -941,6 +941,10 @@ export class OrderService {
     });
 
     if (existingClaim) {
+      if (rewardId === FIRST_ORDER_REWARD_ID && existingClaim.status === 'REDEEMED') {
+        throw new ApiError(400, 'This first-order reward has already been consumed.');
+      }
+
       return existingClaim;
     }
 

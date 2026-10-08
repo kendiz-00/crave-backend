@@ -321,6 +321,20 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
           .send({ reference: 'SUCCESSFUL_REWARD_PAYMENT' });
         expect(duplicateRes.status).toBe(200);
         expect(global.fetch).toHaveBeenCalledTimes(1);
+
+        const secondClaimRes = await request(app)
+          .post('/api/rewards/claims')
+          .set('Authorization', `Bearer ${successfulPaymentToken}`)
+          .send({ rewardId: 'first_order_free_drink' });
+
+        expect(secondClaimRes.status).toBe(400);
+        expect(secondClaimRes.body.error?.message).toContain('already been consumed');
+        expect(await prisma.rewardClaim.count({
+          where: {
+            userId: successfulPaymentUser.id,
+            rewardId: 'first_order_free_drink',
+          },
+        })).toBe(1);
       } finally {
         global.fetch = originalFetch;
         if (originalSecret === undefined) {
@@ -330,6 +344,7 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
         }
         await prisma.payment.deleteMany({ where: { reference: 'SUCCESSFUL_REWARD_PAYMENT' } });
         await prisma.order.deleteMany({ where: { id: order.id } });
+        await prisma.rewardClaim.deleteMany({ where: { userId: successfulPaymentUser.id } });
         await prisma.user.delete({ where: { id: successfulPaymentUser.id } });
       }
     });
