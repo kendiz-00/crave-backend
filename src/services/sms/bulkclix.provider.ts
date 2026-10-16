@@ -44,6 +44,10 @@ export class BulkClixProvider implements SmsProvider {
 
     const message = `Your Crave verification code is ${otp}. Valid for 10 minutes. Do not share this code.`;
 
+    // Note: BulkClix API accepts phone numbers in local (024...) or international (+23324...) format
+    // The API automatically normalizes to 233 format. Our OTP service already normalizes to E.164 (+23324...).
+    // Sending already-normalized numbers is safe and meets BulkClix requirements.
+
     try {
       const response = await fetch(`${this.baseUrl}/sms-api/send`, {
         method: 'POST',
@@ -108,12 +112,14 @@ export class BulkClixProvider implements SmsProvider {
       }
 
       if (!data.data || !data.data.campaignId) {
-        throw new Error(`BulkClix response missing campaignId: ${JSON.stringify(data)}`);
+        throw new Error(`BulkClix response missing campaignId`);
       }
 
-      console.log(`OTP sent successfully to ${phoneNumber} via BulkClix (campaignId: ${data.data.campaignId})`);
+      // Log success without exposing phone number or OTP
+      console.log(`SMS sent successfully via BulkClix (campaignId: ${data.data.campaignId})`);
     } catch (error) {
-      console.error('Error sending OTP via BulkClix:', error);
+      // Log error without exposing sensitive information
+      console.error('Error sending SMS via BulkClix:', error instanceof Error ? error.message : 'Unknown error');
       throw error;
     }
   }
