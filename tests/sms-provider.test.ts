@@ -1,9 +1,10 @@
 /**
- * Africa's Talking SMS Provider Response Handling Tests
- * Tests for safe response parsing and error handling
+ * SMS Provider Tests
+ * Tests for Africa's Talking and BulkClix providers
  */
 
 import { AfricasTalkingProvider } from '../src/services/sms/africas-talking.provider';
+import { BulkClixProvider } from '../src/services/sms/bulkclix.provider';
 
 // Mock fetch to simulate various Africa's Talking responses
 const mockFetch = jest.fn();
@@ -312,6 +313,285 @@ describe('Africa\'s Talking SMS Provider - Response Handling', () => {
       expect(bodyString).toContain('username=testuser');
       expect(bodyString).toContain('to=%2B233241234567');
       expect(bodyString).toContain('from=CRAVE');
+    });
+  });
+});
+
+describe('BulkClix SMS Provider', () => {
+  let provider: BulkClixProvider;
+
+  beforeEach(() => {
+    // Reset environment variables for testing
+    process.env.BULKCLIX_API_KEY = 'test_api_key_12345';
+    process.env.BULKCLIX_SENDER_ID = '9b1c2a3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d';
+    provider = new BulkClixProvider();
+    mockFetch.mockClear();
+  });
+
+  afterEach(() => {
+    delete process.env.BULKCLIX_API_KEY;
+    delete process.env.BULKCLIX_SENDER_ID;
+  });
+
+  describe('Successful SMS delivery', () => {
+    it('should send OTP successfully with valid response', async () => {
+      const successResponse = {
+        message: 'Request Sent',
+        data: {
+          campaignId: '5f0d9c8e-2b1a-4c3d-9e8f-7a6b5c4d3e2f'
+        }
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(successResponse),
+        json: async () => successResponse
+      });
+
+      await expect(provider.sendOtp('+233241234567', '123456')).resolves.not.toThrow();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Verify API key header is included
+      const fetchCall = mockFetch.mock.calls[0];
+      expect(fetchCall[1].headers['x-api-key']).toBe('test_api_key_12345');
+    });
+
+    it('should send OTP with local Ghana phone number format', async () => {
+      const successResponse = {
+        message: 'Request Sent',
+        data: {
+          campaignId: '5f0d9c8e-2b1a-4c3d-9e8f-7a6b5c4d3e2f'
+        }
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(successResponse),
+        json: async () => successResponse
+      });
+
+      await expect(provider.sendOtp('0241234567', '123456')).resolves.not.toThrow();
+
+      // Verify phone number is sent as-is (BulkClix normalizes to 233 format)
+      const fetchCall = mockFetch.mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.recipients).toContain('0241234567');
+    });
+
+    it('should format OTP message correctly', async () => {
+      const successResponse = {
+        message: 'Request Sent',
+        data: {
+          campaignId: '5f0d9c8e-2b1a-4c3d-9e8f-7a6b5c4d3e2f'
+        }
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(successResponse),
+        json: async () => successResponse
+      });
+
+      await provider.sendOtp('+233241234567', '654321');
+
+      const fetchCall = mockFetch.mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.message).toBe('Your Crave verification code is 654321. Valid for 10 minutes. Do not share this code.');
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should handle 402 insufficient balance error', async () => {
+      const errorResponse = {
+        message: 'Insufficient wallet balance',
+        data: null
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 402,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(errorResponse),
+        json: async () => errorResponse
+      });
+
+      await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow('Insufficient SMS credits');
+    });
+
+    it('should handle 422 invalid sender ID error', async () => {
+      const errorResponse = {
+        message: 'Invalid Sender ID',
+        data: null
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(errorResponse),
+        json: async () => errorResponse
+      });
+
+      await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow('Invalid sender ID');
+    });
+
+    it('should handle 403 account blocked error', async () => {
+      const errorResponse = {
+        message: 'Account blocked',
+        data: null
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(errorResponse),
+        json: async () => errorResponse
+      });
+
+      await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow('Account blocked or not whitelisted');
+    });
+
+    it('should handle 429 rate limit error', async () => {
+      const errorResponse = {
+        message: 'Rate limit exceeded',
+        data: null
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(errorResponse),
+        json: async () => errorResponse
+      });
+
+      await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow('Rate limit exceeded');
+    });
+
+    it('should handle non-JSON error response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        headers: {
+          get: (name: string) => (name === 'content-type' ? 'text/plain' : null)
+        },
+        text: async () => 'Internal Server Error',
+        json: async () => { throw new Error('Not JSON'); }
+      });
+
+      await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow('BulkClix API error: HTTP 500');
+    });
+
+    it('should handle network error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(provider.sendOtp('+233241234567', '123456')).rejects.toThrow('Network error');
+    });
+  });
+
+  describe('Missing credentials', () => {
+    it('should throw error when API key is not configured', async () => {
+      delete process.env.BULKCLIX_API_KEY;
+      const providerNoCreds = new BulkClixProvider();
+
+      await expect(providerNoCreds.sendOtp('+233241234567', '123456')).rejects.toThrow('BulkClix API key not configured');
+    });
+
+    it('should throw error when sender ID is not configured', async () => {
+      delete process.env.BULKCLIX_SENDER_ID;
+      const providerNoCreds = new BulkClixProvider();
+
+      await expect(providerNoCreds.sendOtp('+233241234567', '123456')).rejects.toThrow('BulkClix sender ID not configured');
+    });
+  });
+
+  describe('Authentication mechanism', () => {
+    it('should include x-api-key header in request', async () => {
+      const successResponse = {
+        message: 'Request Sent',
+        data: {
+          campaignId: '5f0d9c8e-2b1a-4c3d-9e8f-7a6b5c4d3e2f'
+        }
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(successResponse),
+        json: async () => successResponse
+      });
+
+      await provider.sendOtp('+233241234567', '123456');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.bulkclix.com/api/v1/sms-api/send',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'x-api-key': 'test_api_key_12345',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          })
+        })
+      );
+    });
+
+    it('should include sender_id in request body', async () => {
+      const successResponse = {
+        message: 'Request Sent',
+        data: {
+          campaignId: '5f0d9c8e-2b1a-4c3d-9e8f-7a6b5c4d3e2f'
+        }
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null
+        },
+        text: async () => JSON.stringify(successResponse),
+        json: async () => successResponse
+      });
+
+      await provider.sendOtp('+233241234567', '123456');
+
+      const fetchCall = mockFetch.mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+
+      expect(body.sender_id).toBe('9b1c2a3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d');
+      expect(body.recipients).toContain('+233241234567');
+    });
+  });
+
+  describe('Provider name', () => {
+    it('should return correct provider name', () => {
+      expect(provider.getProviderName()).toBe('BulkClix');
     });
   });
 });
