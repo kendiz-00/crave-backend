@@ -16,7 +16,8 @@
     "type-check": "tsc --noEmit",
     "prebuild": "npm run clean",
     "postinstall": "prisma generate",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "menu:import": "node scripts/import-menu.js"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

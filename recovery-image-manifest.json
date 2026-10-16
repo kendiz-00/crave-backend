@@ -1,0 +1,286 @@
+{
+  "formatVersion": 1,
+  "evidence": "Image paths were checked against the local frontend assets when this recovery package was prepared.",
+  "products": [
+    {
+      "slug": "sunkissed-strawberry-mango-smoothie",
+      "imageUrl": "images/sunkissed_strawberry_mango_smoothie.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "red-velvet-cake",
+      "imageUrl": "images/red_velvet_cake.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "american-pancakes-eggs",
+      "imageUrl": "images/american_pancakes.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "french-toast-maple-syrup-eggs",
+      "imageUrl": "images/french_toast.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "pork-fried-rice",
+      "imageUrl": "images/pork_fried_rice.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "assorted-chicken-fried-rice",
+      "imageUrl": "images/assorted_chicken_fried_rice.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "creamy-chicken-fettuccine-alfredo",
+      "imageUrl": "images/creamy_chicken_fettuccine_alfredo.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "spaghetti-bolognese",
+      "imageUrl": "images/spaghetti_bolognese.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "loaded-mac-cheese-bowl",
+      "imageUrl": "images/loaded_mac_cheese_bowl.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "ultimate-chicken-cheddar-burger",
+      "imageUrl": "images/ultimate_chicken_cheddar_burger.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "loaded-sausage-cheddar-burger",
+      "imageUrl": "images/loaded_sausage_cheddar_burger.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "cheesy-macaroni-hot-wings",
+      "imageUrl": "images/cheesy_macaroni_hot_wings.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "chicken-nuggets-fries",
+      "imageUrl": "images/chicken_nuggets_fries.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "cheesy-fries",
+      "imageUrl": "images/cheesy_fries.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "extra-napkins",
+      "imageUrl": "images/napkins.jpg",
+      "assetPresent": false
+    },
+    {
+      "slug": "extra-sauce-pack",
+      "imageUrl": "images/sauce.jpg",
+      "assetPresent": false
+    },
+    {
+      "slug": "american-blt",
+      "imageUrl": "images/blt_sandwich.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "tuna-fish-sandwich",
+      "imageUrl": "images/tuna_sandwich.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "grilled-cheese-sandwich",
+      "imageUrl": "images/grilled_sandwich.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "strawberry-bliss-shake",
+      "imageUrl": "images/strawberry_banana.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "vanilla-bean-shake",
+      "imageUrl": "images/vanilla_shake.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "classic-chocolate-shake",
+      "imageUrl": "images/choco_shake.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "banana-peanut-chocolate",
+      "imageUrl": "images/peanut.jpeg",
+      "assetPresent": true
+    },
+    {
+      "slug": "lemonade-ice",
+      "imageUrl": "images/brazilian_lemonade.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "strawberries-cream",
+      "imageUrl": "images/strawberry_cream.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "strawberry-pineapple-tang",
+      "imageUrl": "images/pineapple_stawberry.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "exotic-tropical-fruit-blend",
+      "imageUrl": "images/tropical.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "green-glow",
+      "imageUrl": "images/green_glow.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "water-mint-ice-slushie",
+      "imageUrl": "images/watermelon_mint.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "sexy-pina-colada",
+      "imageUrl": "images/pina_colada.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "strawberry-colada-blast",
+      "imageUrl": "images/strawberry_banana.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "loaded-omelette",
+      "imageUrl": "images/omelette.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "chicken-waffles",
+      "imageUrl": "images/waffles.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "pink-guava-cake",
+      "imageUrl": "images/guava.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "coffee-latte-cake",
+      "imageUrl": "images/coffe_latte.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "pistachio-dream-cake",
+      "imageUrl": "images/pistachio.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "salted-caramel-cake",
+      "imageUrl": "images/salted_caramel.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "baileys-irish-cream-cake",
+      "imageUrl": "images/bailey.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "vanilla-buttercream-cake",
+      "imageUrl": "images/vanilla.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "lemon-buttercream-jar-cake",
+      "imageUrl": "images/lemon.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "biscoff-jar-cake",
+      "imageUrl": "images/biscoff.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "chocolate-buttercream-jar-cake",
+      "imageUrl": "images/choco_jar.jpeg",
+      "assetPresent": true
+    },
+    {
+      "slug": "beef-crispy-tacos",
+      "imageUrl": "images/beef_tacos.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "chicken-crispy-tacos",
+      "imageUrl": "images/tacos.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "chicken-burrito",
+      "imageUrl": "images/burrito.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "jerk-chicken-shawarma",
+      "imageUrl": "images/jerk_shawarma.jpeg",
+      "assetPresent": true
+    },
+    {
+      "slug": "melted-cheddar-burger",
+      "imageUrl": "images/melted_burger.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "ultimate-bacon-cheddar-burger",
+      "imageUrl": "images/bacon_burger.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "glazed-crispy-chicken",
+      "imageUrl": "images/glazed_chicken_fries.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "siracha-hot-wings-fries",
+      "imageUrl": "images/siracha_wings_fries.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "honey-bbq-wings-fries",
+      "imageUrl": "images/bbq_wings.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "extra-insanity-hot-chicken",
+      "imageUrl": "images/hot_chicken.jpeg",
+      "assetPresent": true
+    },
+    {
+      "slug": "bacon-cheddar-fries",
+      "imageUrl": "images/bacon_fries.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "bbq-chicken-cheddar-fries",
+      "imageUrl": "images/bbq_fries.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "cheese-beef-loaded-fries",
+      "imageUrl": "images/beef_loaded.jpg",
+      "assetPresent": true
+    },
+    {
+      "slug": "loaded-fries",
+      "imageUrl": "images/loaded_fries_01.jpg",
+      "assetPresent": true
+    }
+  ]
+}
