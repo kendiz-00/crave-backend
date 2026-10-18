@@ -30,6 +30,14 @@ router.get('/balance', orderController.getRewardBalance);
 router.get('/history', orderController.getRewardHistory);
 
 /**
+ * @route   GET /api/rewards/eligible-drinks
+ * @desc    Return the backend-controlled list of drink names eligible for the 100-point milestone reward.
+ *          Frontend must use this list and must not maintain its own conflicting copy.
+ * @access  Private
+ */
+router.get('/eligible-drinks', orderController.getEligibleDrinks);
+
+/**
  * @route   POST /api/rewards/transactions
  * @desc    Create a reward transaction (Admin/Owner only - prevents arbitrary point minting)
  * @access  Private (Admin/Owner)
