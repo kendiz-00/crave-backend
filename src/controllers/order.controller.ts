@@ -4,7 +4,7 @@ import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema, 
 import { asyncHandler } from '../middleware/asyncHandler';
 import { ApiError } from '@/types/errors';
 import { config } from '@/config';
-import { ELIGIBLE_FREE_DRINK_IDS, PROPOSED_ELIGIBLE_FREE_DRINKS } from '../services/order.service';
+import { ELIGIBLE_FREE_DRINK_IDS, PROPOSED_ELIGIBLE_FREE_DRINKS, IS_FREE_DRINK_ELIGIBILITY_APPROVED } from '../services/order.service';
 
 export class OrderController {
   /**
@@ -234,13 +234,17 @@ export class OrderController {
    * The frontend must consume this list and must not maintain a conflicting local copy.
    */
   getEligibleDrinks = asyncHandler(async (_req: Request, res: Response) => {
+    const isApproved = IS_FREE_DRINK_ELIGIBILITY_APPROVED;
     res.status(200).json({
       success: true,
       data: {
         rewardId: 'milestone_free_drink_100',
-        eligibleProductIds: ELIGIBLE_FREE_DRINK_IDS,
-        eligibleDrinks: PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name),
-        items: PROPOSED_ELIGIBLE_FREE_DRINKS,
+        isApproved,
+        status: isApproved ? 'ACTIVE' : 'PENDING_BUSINESS_APPROVAL',
+        eligibleProductIds: isApproved ? ELIGIBLE_FREE_DRINK_IDS : [],
+        eligibleDrinks: isApproved ? PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name) : [],
+        items: isApproved ? PROPOSED_ELIGIBLE_FREE_DRINKS : [],
+        proposedItems: PROPOSED_ELIGIBLE_FREE_DRINKS,
       },
     });
   });

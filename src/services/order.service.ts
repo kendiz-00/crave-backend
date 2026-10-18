@@ -73,6 +73,23 @@ export const ELIGIBLE_FREE_DRINKS = [
   'Pineapple Strawberry',
 ];
 
+/**
+ * Feature flag controlling whether the free drink eligibility list has received explicit business approval.
+ * Disabled (false) by default in production.
+ * Can be activated by setting REWARDS_ELIGIBLE_DRINKS_ENABLED=true in environment or calling setFreeDrinkEligibilityApproved(true).
+ */
+export let IS_FREE_DRINK_ELIGIBILITY_APPROVED = process.env.REWARDS_ELIGIBLE_DRINKS_ENABLED === 'true';
+
+export function setFreeDrinkEligibilityApproved(approved: boolean) {
+  IS_FREE_DRINK_ELIGIBILITY_APPROVED = approved;
+}
+
+/**
+ * Reservation expiration window for in-flight checkouts.
+ * Default is 15 minutes (900,000 ms).
+ */
+export const RESERVATION_EXPIRATION_MS = parseInt(process.env.REWARD_RESERVATION_TTL_MS || '900000', 10);
+
 export const MILESTONE_CONFIG: Record<
   string,
   {
@@ -197,9 +214,21 @@ export class OrderService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let validClaimToRedeem: any = null;
     if (data.claimedRewardId) {
-      const claim = await prisma.rewardClaim.findFirst({
+      let claim = await prisma.rewardClaim.findFirst({
         where: { id: data.claimedRewardId, userId },
       });
+
+      if (!claim) {
+        throw new ApiError(400, 'Invalid reward claim');
+      }
+
+      // Safe expiration and payment-aware reconciliation if currently RESERVED
+      if (claim.status === 'RESERVED') {
+        const reconciled = await this.reconcileClaimReservation(claim.id, userId);
+        if (reconciled) {
+          claim = reconciled;
+        }
+      }
 
       if (!claim) {
         throw new ApiError(400, 'Invalid reward claim');
@@ -211,6 +240,10 @@ export class OrderService {
 
       if (claim.orderId) {
         throw new ApiError(400, 'Reward claim is already linked to another order');
+      }
+
+      if (!IS_FREE_DRINK_ELIGIBILITY_APPROVED && (claim.rewardId === MILESTONE_100_REWARD_ID || claim.rewardId === FIRST_ORDER_REWARD_ID)) {
+        throw new ApiError(400, 'Free drink reward eligibility list is currently pending business approval. Free drink rewards are disabled until approved.');
       }
 
       const milestoneConfig = MILESTONE_CONFIG[claim.rewardId];
@@ -1154,6 +1187,16 @@ export class OrderService {
       }
     }
 
+    // Reconcile any expired reservations for this user
+    for (let i = 0; i < milestoneClaims.length; i++) {
+      if (milestoneClaims[i].status === 'RESERVED') {
+        const reconciled = await this.reconcileClaimReservation(milestoneClaims[i].id, userId);
+        if (reconciled) {
+          milestoneClaims[i] = reconciled;
+        }
+      }
+    }
+
     const tier = this.calculateTier(balance);
 
     return {
@@ -1308,6 +1351,148 @@ export class OrderService {
         redeemedAt: new Date(),
       },
     });
+  }
+
+  /**
+   * Helper to verify a Paystack reference status directly without performing mutations.
+   * Returns 'success' | 'failed' | 'abandoned' | 'pending' | 'unknown'.
+   */
+  async checkPaystackReferenceStatus(reference: string): Promise<'success' | 'failed' | 'abandoned' | 'pending' | 'unknown'> {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey) return 'unknown';
+
+    try {
+      const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const body = (await response.json()) as { status?: boolean; data?: { status?: string } };
+      if (!body?.status || !body?.data) return 'unknown';
+      const status = body.data.status?.toLowerCase();
+      if (status === 'success') return 'success';
+      if (status === 'failed') return 'failed';
+      if (status === 'abandoned') return 'abandoned';
+      if (status === 'pending' || status === 'ongoing' || status === 'processing') return 'pending';
+      return 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Safe, payment-aware reconciliation for an individual claim reservation.
+   * Guarantees:
+   * 1. Never releases a reservation if payment may have succeeded.
+   * 2. Automatically releases abandoned reservations after the TTL window (default 15 mins)
+   *    only once confirmed absent or failed at the payment gateway.
+   * 3. Permanently redeems the claim if payment is verified to have succeeded.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async reconcileClaimReservation(claimId: string, userId: string): Promise<any> {
+    const claim = await prisma.rewardClaim.findFirst({
+      where: { id: claimId, userId },
+    });
+
+    if (!claim || claim.status !== 'RESERVED') {
+      return claim;
+    }
+
+    // If reservation is still within active checkout window (< 15 mins), keep RESERVED
+    const now = Date.now();
+    const reservedTime = claim.reservedAt ? claim.reservedAt.getTime() : 0;
+    if (reservedTime && now - reservedTime < RESERVATION_EXPIRATION_MS) {
+      return claim;
+    }
+
+    // Reservation is older than TTL — inspect linked order and payment
+    if (!claim.orderId) {
+      return await prisma.rewardClaim.update({
+        where: { id: claim.id },
+        data: { status: 'AVAILABLE', reservedAt: null, orderId: null },
+      });
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id: claim.orderId },
+      include: {
+        payments: true,
+      },
+    });
+
+    if (!order) {
+      return await prisma.rewardClaim.update({
+        where: { id: claim.id },
+        data: { status: 'AVAILABLE', reservedAt: null, orderId: null },
+      });
+    }
+
+    // If order was already marked paid, finalize claim as REDEEMED (never release)
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      return await prisma.rewardClaim.update({
+        where: { id: claim.id },
+        data: { status: 'REDEEMED', redeemedAt: new Date() },
+      });
+    }
+
+    // If order is explicitly cancelled or payment failed, safely release back to AVAILABLE
+    if (order.status === OrderStatus.CANCELLED || order.paymentStatus === PaymentStatus.FAILED) {
+      return await prisma.rewardClaim.update({
+        where: { id: claim.id },
+        data: { status: 'AVAILABLE', reservedAt: null, orderId: null },
+      });
+    }
+
+    // If order is PENDING: inspect payment record
+    const payment = order.payments && order.payments.length > 0 ? order.payments[0] : null;
+
+    if (!payment || !payment.reference) {
+      // No payment was ever initiated. Safe to cancel order and release reservation.
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: OrderStatus.CANCELLED, paymentStatus: PaymentStatus.FAILED },
+      });
+      return await prisma.rewardClaim.update({
+        where: { id: claim.id },
+        data: { status: 'AVAILABLE', reservedAt: null, orderId: null },
+      });
+    }
+
+    // Payment reference exists: verify with Paystack
+    const gatewayStatus = await this.checkPaystackReferenceStatus(payment.reference);
+
+    if (gatewayStatus === 'success') {
+      // Payment actually succeeded! Complete order and finalize claim as REDEEMED
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { paymentStatus: PaymentStatus.PAID, status: 'CONFIRMED' },
+        });
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { status: PaymentStatus.PAID, verifiedAt: new Date() },
+        });
+        await this.processOrderPaymentSuccess(tx, order.id);
+      });
+      return await prisma.rewardClaim.findUnique({ where: { id: claim.id } });
+    }
+
+    if (gatewayStatus === 'failed' || gatewayStatus === 'abandoned') {
+      // Payment definitely failed or abandoned at gateway -> cancel order and release claim
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: OrderStatus.CANCELLED, paymentStatus: PaymentStatus.FAILED },
+      });
+      return await prisma.rewardClaim.update({
+        where: { id: claim.id },
+        data: { status: 'AVAILABLE', reservedAt: null, orderId: null },
+      });
+    }
+
+    // If gateway status is pending, ongoing, or unknown (network error):
+    // DO NOT RELEASE. Preserve reservation to prevent double-dipping.
+    return claim;
   }
 
   /**
