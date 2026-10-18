@@ -177,7 +177,8 @@ router.post(
 
     const refund = await paymentService.refundPayment(
       req.params.id,
-      validatedData.reason
+      validatedData.reason,
+      validatedData.amount
     );
 
     res.json({

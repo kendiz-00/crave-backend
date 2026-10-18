@@ -14,6 +14,7 @@ export const verifyPaymentSchema = z.object({
 export const refundPaymentSchema = z.object({
   paymentId: z.string().uuid('Invalid payment ID'),
   reason: z.string().optional(),
+  amount: z.number().positive('Refund amount must be positive').optional(),
 });
 
 export type InitializePaymentInput = z.infer<typeof initializePaymentSchema>;

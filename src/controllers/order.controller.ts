@@ -3,6 +3,7 @@ import { orderService } from '../services';
 import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema, createRewardTransactionForUserSchema, claimRewardSchema } from '../validators';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { ApiError } from '@/types/errors';
+import { config } from '@/config';
 
 export class OrderController {
   /**
@@ -317,7 +318,7 @@ Notes: ${order.notes || 'None'}
 `.trim();
 
     const encodedMessage = encodeURIComponent(message);
-    const phoneNumber = process.env.WHATSAPP_NUMBER;
+    const phoneNumber = process.env.WHATSAPP_NUMBER || (config.isDevelopment || process.env.NODE_ENV === 'test' ? '+233200000000' : null);
     if (!phoneNumber) {
       throw new ApiError(500, 'WhatsApp number not configured');
     }

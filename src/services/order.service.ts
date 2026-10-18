@@ -4,42 +4,64 @@ import { CreateOrderInput, UpdateOrderStatusInput, UpdatePaymentStatusInput } fr
 import { cartService } from './cart.service';
 import prisma from '@/database';
 
-const FIRST_ORDER_REWARD_ID = 'first_order_free_drink';
+type PricedRecord = { id: string; price: number | string | { toString(): string } };
+type PricedCartItem = { menuItemId: string; quantity: number; addOns?: { addOnId: string }[] };
 
-const MILESTONE_CONFIG: Record<string, { points: number; name: string; categories?: string[]; names?: string[] }> = {
+export function calculateCartSubtotalFromCatalog(
+  items: PricedCartItem[],
+  menuItems: PricedRecord[],
+  addOns: PricedRecord[],
+): number {
+  return items.reduce((subtotal, item) => {
+    const menuItem = menuItems.find(candidate => candidate.id === item.menuItemId);
+    if (!menuItem) {
+      throw new ApiError(400, 'Menu item no longer exists');
+    }
+    const addOnTotal = (item.addOns || []).reduce((sum, selectedAddOn) => {
+      const addOn = addOns.find(candidate => candidate.id === selectedAddOn.addOnId);
+      if (!addOn) {
+        throw new ApiError(400, 'One or more add-ons are invalid or no longer available');
+      }
+      return sum + Number(addOn.price);
+    }, 0);
+    return subtotal + (Number(menuItem.price) + addOnTotal) * item.quantity;
+  }, 0);
+}
+
+export function calculateOrderAmounts(subtotal: number, discount: number, deliveryFee = 0) {
+  const tax = Math.round(subtotal * 0.05 * 100) / 100;
+  const grandTotal = Math.round(Math.max(0, subtotal - discount + tax + deliveryFee) * 100) / 100;
+  return { tax, grandTotal };
+}
+
+export const FIRST_ORDER_REWARD_ID = 'first_order_free_drink';
+export const MILESTONE_100_REWARD_ID = 'milestone_free_drink_100';
+
+export const ELIGIBLE_FREE_DRINKS = [
+  'Strawberry Colada',
+  'Pina Colada',
+  'Watermelon Mint Ice',
+  'Green Glow',
+  'Green Glow Smoothie',
+  'Tropical Fruit Blend',
+  'Pineapple Strawberry',
+  'Strawberries and Cream',
+  'Lemonade Ice',
+  'Banana Peanut Butter Chocolate',
+];
+
+export const MILESTONE_CONFIG: Record<string, { points: number; name: string; categories?: string[]; names?: string[] }> = {
   [FIRST_ORDER_REWARD_ID]: {
     points: 0,
     name: 'Free Drink',
     categories: ['smoothies'],
-    names: [
-      'Strawberry Colada',
-      'Pina Colada',
-      'Watermelon Mint Ice',
-      'Green Glow',
-      'Green Glow Smoothie',
-      'Tropical Fruit Blend',
-      'Pineapple Strawberry',
-      'Strawberries and Cream',
-      'Lemonade Ice',
-      'Banana Peanut Butter Chocolate',
-    ],
+    names: ELIGIBLE_FREE_DRINKS,
   },
-  milestone_free_drink_100: {
+  [MILESTONE_100_REWARD_ID]: {
     points: 100,
     name: 'Free Drink',
     categories: ['smoothies'],
-    names: [
-      'Strawberry Colada',
-      'Pina Colada',
-      'Watermelon Mint Ice',
-      'Green Glow',
-      'Green Glow Smoothie',
-      'Tropical Fruit Blend',
-      'Pineapple Strawberry',
-      'Strawberries and Cream',
-      'Lemonade Ice',
-      'Banana Peanut Butter Chocolate',
-    ],
+    names: ELIGIBLE_FREE_DRINKS,
   },
   milestone_free_dessert_250: {
     points: 250,
@@ -185,8 +207,12 @@ export class OrderService {
         throw new ApiError(400, 'Invalid reward claim');
       }
 
-      if (claim.status !== 'CLAIMED') {
-        throw new ApiError(400, 'Reward claim has already been redeemed or is invalid');
+      if (claim.status !== 'AVAILABLE' && claim.status !== 'CLAIMED') {
+        throw new ApiError(400, 'Reward claim is not available for redemption');
+      }
+
+      if (claim.orderId) {
+        throw new ApiError(400, 'Reward claim is already linked to another order');
       }
 
       const milestoneConfig = MILESTONE_CONFIG[claim.rewardId];
@@ -199,12 +225,15 @@ export class OrderService {
       let eligibleItem: any = null;
       for (const item of cart.items) {
         const catSlug = item.menuItem.category?.slug?.toLowerCase() || '';
-        const itemName = item.menuItem.name;
+        const itemName = item.menuItem.name?.trim().toLowerCase();
 
+        const nameMatches = milestoneConfig.names && milestoneConfig.names.some(n => n.toLowerCase() === itemName);
         const catMatches = milestoneConfig.categories && milestoneConfig.categories.some(c => catSlug.includes(c.toLowerCase()));
-        const nameMatches = milestoneConfig.names && milestoneConfig.names.some(n => n.toLowerCase() === itemName.toLowerCase());
 
-        if (catMatches || nameMatches) {
+        // If names list is configured (e.g. for free drink rewards), strictly require name match
+        const isMatch = milestoneConfig.names && milestoneConfig.names.length > 0 ? nameMatches : catMatches;
+
+        if (isMatch) {
           if (!eligibleItem || Number(item.menuItem.price) > Number(eligibleItem.menuItem.price)) {
             eligibleItem = item;
           }
@@ -233,10 +262,9 @@ export class OrderService {
     // Calculate totals (backend recalculation to prevent price tampering)
     const cartTotal = await this.calculateCartTotalFromItems(cart.items);
     const subtotal = cartTotal.subtotal;
-    const tax = subtotal * 0.05; // 5% tax
     const deliveryFee = 0; // Delivery fee removed (GH¢ 0.00)
     const totalDiscount = discount + pointsDiscount + rewardDiscount;
-    const grandTotal = Math.max(0, subtotal - totalDiscount + tax + deliveryFee);
+    const { tax, grandTotal } = calculateOrderAmounts(subtotal, totalDiscount, deliveryFee);
 
     // Generate order number
     const orderNumber = this.generateOrderNumber();
@@ -322,17 +350,20 @@ export class OrderService {
         });
       }
 
-      // Link the claimed reward to the pending order. Redemption occurs only after
-      // the payment is successfully verified, keeping failed checkouts reusable.
+      // Atomically reserve the claimed reward for this pending order.
+      // Final redemption to REDEEMED occurs only after verified payment.
       if (validClaimToRedeem) {
         const claimUpdate = await tx.rewardClaim.updateMany({
           where: {
             id: validClaimToRedeem.id,
             userId,
-            status: 'CLAIMED',
+            status: { in: ['AVAILABLE', 'CLAIMED'] },
+            orderId: null,
           },
           data: {
+            status: 'RESERVED',
             orderId: newOrder.id,
+            reservedAt: new Date(),
           },
         });
 
@@ -341,28 +372,22 @@ export class OrderService {
         }
       }
 
-      // Redeem reward points if applicable (deduct before earning)
+      // Redeem reward points if applicable (deduct atomically inside transaction)
       if (pointsRedeemed > 0) {
-        await this.createRewardTransactionForUser(
+        await this.createRewardTransaction(
+          tx,
           userId,
+          newOrder.id,
           RewardTransactionType.REDEEM,
           -pointsRedeemed,
           `Reward points redeemed on order ${orderNumber}`,
-          newOrder.id,
-          `order_${newOrder.id}`,
+          `redeem_order_${newOrder.id}`,
         );
       }
 
-      // Award reward points (1 point per GHS spent)
+      // Projected reward points to be awarded upon verified payment (1 point per GHS spent).
+      // Note: Points are NOT credited prematurely here; they are credited only upon verified payment.
       const pointsEarned = Math.floor(grandTotal);
-      await this.createRewardTransaction(
-        tx,
-        userId,
-        newOrder.id,
-        RewardTransactionType.EARN,
-        pointsEarned,
-        'Order completed',
-      );
 
       // Generate reward code for customer
       const rewardCode = await this.generateRewardCode(tx, userId);
@@ -371,7 +396,7 @@ export class OrderService {
         data: { rewardCodeGenerated: rewardCode.code, rewardPointsEarned: pointsEarned },
       });
 
-      return { ...newOrder, rewardCodeGenerated: rewardCode.code };
+      return { ...newOrder, rewardCodeGenerated: rewardCode.code, rewardPointsEarned: pointsEarned };
     });
 
     return order;
@@ -463,32 +488,7 @@ export class OrderService {
     ]);
 
     // Create maps for O(1) lookup
-    const menuItemMap = new Map(menuItems.map(item => [item.id, item]));
-    const addOnMap = new Map(addOns.map(addOn => [addOn.id, addOn]));
-
-    for (const item of items) {
-      const menuItem = menuItemMap.get(item.menuItemId);
-
-      if (!menuItem) {
-        throw new ApiError(400, `Menu item no longer exists`);
-      }
-
-      const unitPrice = Number(menuItem.price);
-
-      let addOnsPrice = 0;
-      if (item.addOns && item.addOns.length > 0) {
-        for (const addOn of item.addOns) {
-          const addOnData = addOnMap.get(addOn.addOnId);
-          if (addOnData) {
-            addOnsPrice += Number(addOnData.price);
-          }
-        }
-      }
-
-      const itemTotal = (unitPrice + addOnsPrice) * item.quantity;
-      subtotal += itemTotal;
-    }
-
+    subtotal = calculateCartSubtotalFromCatalog(items, menuItems, addOns);
     return { subtotal };
   }
 
@@ -642,17 +642,40 @@ export class OrderService {
       }
 
       if (data.status === OrderStatus.CANCELLED) {
+        // Only release RESERVED claims back to AVAILABLE. REDEEMED claims must NEVER be released.
         await tx.rewardClaim.updateMany({
           where: {
             orderId: orderId,
-            status: 'REDEEMED',
+            status: 'RESERVED',
           },
           data: {
-            status: 'CLAIMED',
-            redeemedAt: null,
+            status: 'AVAILABLE',
+            reservedAt: null,
             orderId: null,
           },
         });
+
+        // Restore spent points if order was cancelled before being paid
+        if (order.rewardPointsUsed && order.rewardPointsUsed > 0 && order.paymentStatus !== PaymentStatus.PAID) {
+          const restoreRef = `restore_cancel_${order.id}`;
+          const existingRestore = await tx.rewardTransaction.findFirst({
+            where: {
+              userId: order.userId,
+              referenceId: restoreRef,
+            },
+          });
+          if (!existingRestore) {
+            await this.createRewardTransaction(
+              tx,
+              order.userId,
+              order.id,
+              RewardTransactionType.ADJUSTMENT,
+              order.rewardPointsUsed,
+              `Restored spendable points from cancelled order ${order.orderNumber}`,
+              restoreRef,
+            );
+          }
+        }
       }
 
       return tx.order.update({
@@ -688,17 +711,44 @@ export class OrderService {
       }
 
       if (data.paymentStatus === PaymentStatus.FAILED) {
+        // Release any RESERVED claim back to AVAILABLE
         await tx.rewardClaim.updateMany({
           where: {
             orderId: orderId,
-            status: 'REDEEMED',
+            status: 'RESERVED',
           },
           data: {
-            status: 'CLAIMED',
-            redeemedAt: null,
+            status: 'AVAILABLE',
+            reservedAt: null,
             orderId: null,
           },
         });
+
+        // Restore spent points
+        if (order.rewardPointsUsed && order.rewardPointsUsed > 0) {
+          const restoreRef = `restore_fail_${order.id}`;
+          const existingRestore = await tx.rewardTransaction.findFirst({
+            where: {
+              userId: order.userId,
+              referenceId: restoreRef,
+            },
+          });
+          if (!existingRestore) {
+            await this.createRewardTransaction(
+              tx,
+              order.userId,
+              order.id,
+              RewardTransactionType.ADJUSTMENT,
+              order.rewardPointsUsed,
+              `Restored spendable points from failed payment on order ${order.orderNumber}`,
+              restoreRef,
+            );
+          }
+        }
+      }
+
+      if (data.paymentStatus === PaymentStatus.PAID) {
+        await this.processOrderPaymentSuccess(tx, orderId);
       }
 
       return tx.order.update({
@@ -750,11 +800,22 @@ export class OrderService {
     type: string,
     points: number,
     reason: string,
+    referenceId?: string | null,
   ) {
     // Lock user row first for concurrency safety
     await tx.$queryRaw`
       SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE
     `;
+
+    // Idempotency: if referenceId is provided, check if transaction already exists
+    if (referenceId) {
+      const existing = await tx.rewardTransaction.findFirst({
+        where: { userId, referenceId },
+      });
+      if (existing) {
+        return existing;
+      }
+    }
 
     // Get current balance
     const lastTransaction = await tx.rewardTransaction.findFirst({
@@ -762,7 +823,12 @@ export class OrderService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const runningBalance = (lastTransaction?.runningBalance || 0) + points;
+    const currentBalance = lastTransaction?.runningBalance || 0;
+    const runningBalance = currentBalance + points;
+
+    if (type === 'REDEEM' && runningBalance < 0) {
+      throw new ApiError(400, 'Insufficient reward points');
+    }
 
     // Increment lifetimePointsEarned for EARN transactions
     if (type === 'EARN' && points > 0) {
@@ -780,6 +846,7 @@ export class OrderService {
       data: {
         userId,
         orderId,
+        referenceId: referenceId || null,
         type: type as RewardTransactionType,
         points,
         runningBalance,
@@ -924,7 +991,7 @@ export class OrderService {
     // Check if user's phone is verified (required for point-based milestone rewards, but bypassed for first-order reward)
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { phoneVerified: true, phone: true },
+      select: { phoneVerified: true, phone: true, lifetimePointsEarned: true },
     });
 
     if (!user || !user.phoneVerified) {
@@ -941,8 +1008,8 @@ export class OrderService {
     });
 
     if (existingClaim) {
-      if (rewardId === FIRST_ORDER_REWARD_ID && existingClaim.status === 'REDEEMED') {
-        throw new ApiError(400, 'This first-order reward has already been consumed.');
+      if ((rewardId === FIRST_ORDER_REWARD_ID || rewardId === MILESTONE_100_REWARD_ID) && existingClaim.status === 'REDEEMED') {
+        throw new ApiError(400, 'This reward has already been consumed.');
       }
 
       return existingClaim;
@@ -988,10 +1055,10 @@ export class OrderService {
       }
     }
 
-    // Check user's current points balance for points-based rewards
-    const currentBalance = await this.getUserRewardBalance(userId);
-    if (currentBalance < milestoneConfig.points) {
-      throw new ApiError(400, `Insufficient points balance. ${milestoneConfig.points} points required to claim ${milestoneConfig.name}.`);
+    // Milestone eligibility is strictly gated by verified lifetimePointsEarned (Rule 2)
+    const lifetimePoints = user.lifetimePointsEarned || 0;
+    if (lifetimePoints < milestoneConfig.points) {
+      throw new ApiError(400, `Insufficient lifetime points. ${milestoneConfig.points} lifetime points required for ${milestoneConfig.name}.`);
     }
 
     // Create persistent claim in PostgreSQL (idempotent / concurrency safe via unique constraint)
@@ -1000,7 +1067,7 @@ export class OrderService {
         data: {
           userId,
           rewardId,
-          status: 'CLAIMED',
+          status: 'AVAILABLE',
         },
       });
 
@@ -1052,6 +1119,27 @@ export class OrderService {
       }),
     ]);
 
+    // Ensure milestone 100 free drink entitlement exists if user has reached 100 lifetime points
+    if ((user?.lifetimePointsEarned || 0) >= 100) {
+      const hasMilestone100 = milestoneClaims.some(c => c.rewardId === MILESTONE_100_REWARD_ID);
+      if (!hasMilestone100) {
+        try {
+          const autoClaim = await prisma.rewardClaim.create({
+            data: {
+              userId,
+              rewardId: MILESTONE_100_REWARD_ID,
+              status: 'AVAILABLE',
+            },
+          });
+          milestoneClaims.unshift(autoClaim);
+        } catch (e: unknown) {
+          if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) {
+            throw e;
+          }
+        }
+      }
+    }
+
     const tier = this.calculateTier(balance);
 
     return {
@@ -1062,6 +1150,150 @@ export class OrderService {
       claims: milestoneClaims,
       history: recentHistory,
     };
+  }
+
+  /**
+   * Process all reward and fulfillment actions upon verified successful payment.
+   * Atomic and idempotent:
+   * 1. Awards reward points (1 point per GHS spent) if not already awarded.
+   * 2. Unlocks milestone 100 free drink entitlement if user reaches 100 lifetime points.
+   * 3. Permanently transitions RESERVED / CLAIMED reward claims to REDEEMED.
+   */
+  async processOrderPaymentSuccess(tx: Prisma.TransactionClient, orderId: string) {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: {
+        user: {
+          select: { id: true, lifetimePointsEarned: true },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new ApiError(404, 'Order not found');
+    }
+
+    // 1. Award reward points idempotently
+    const earnReferenceId = `earn_order_${order.id}`;
+    const existingEarnTx = await tx.rewardTransaction.findFirst({
+      where: {
+        userId: order.userId,
+        referenceId: earnReferenceId,
+      },
+    });
+
+    const pointsToEarn = order.rewardPointsEarned ?? Math.floor(Number(order.grandTotal));
+
+    if (!existingEarnTx && pointsToEarn > 0) {
+      // Lock user row for concurrency safety
+      await tx.$queryRaw`
+        SELECT id FROM "User" WHERE id = ${order.userId} FOR UPDATE
+      `;
+
+      const lastTx = await tx.rewardTransaction.findFirst({
+        where: { userId: order.userId },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const currentBalance = lastTx?.runningBalance || 0;
+      const runningBalance = currentBalance + pointsToEarn;
+
+      // Increment lifetimePointsEarned
+      const updatedUser = await tx.user.update({
+        where: { id: order.userId },
+        data: {
+          lifetimePointsEarned: {
+            increment: pointsToEarn,
+          },
+        },
+        select: { lifetimePointsEarned: true },
+      });
+
+      // Create EARN ledger entry
+      await tx.rewardTransaction.create({
+        data: {
+          userId: order.userId,
+          orderId: order.id,
+          referenceId: earnReferenceId,
+          type: RewardTransactionType.EARN,
+          points: pointsToEarn,
+          runningBalance,
+          reason: `Points earned on order ${order.orderNumber}`,
+        },
+      });
+
+      // 2. Automatic 100-point milestone unlock
+      if (updatedUser.lifetimePointsEarned >= 100) {
+        const existingClaim = await tx.rewardClaim.findUnique({
+          where: {
+            userId_rewardId: {
+              userId: order.userId,
+              rewardId: MILESTONE_100_REWARD_ID,
+            },
+          },
+        });
+
+        if (!existingClaim) {
+          try {
+            await tx.rewardClaim.create({
+              data: {
+                userId: order.userId,
+                rewardId: MILESTONE_100_REWARD_ID,
+                status: 'AVAILABLE',
+              },
+            });
+          } catch (e: unknown) {
+            if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) {
+              throw e;
+            }
+          }
+        }
+      }
+    } else {
+      // If points were already awarded or pointsToEarn is 0, check if milestone unlock is needed
+      const user = await tx.user.findUnique({
+        where: { id: order.userId },
+        select: { lifetimePointsEarned: true },
+      });
+      if (user && user.lifetimePointsEarned >= 100) {
+        const existingClaim = await tx.rewardClaim.findUnique({
+          where: {
+            userId_rewardId: {
+              userId: order.userId,
+              rewardId: MILESTONE_100_REWARD_ID,
+            },
+          },
+        });
+        if (!existingClaim) {
+          try {
+            await tx.rewardClaim.create({
+              data: {
+                userId: order.userId,
+                rewardId: MILESTONE_100_REWARD_ID,
+                status: 'AVAILABLE',
+              },
+            });
+          } catch (e: unknown) {
+            if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) {
+              throw e;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Permanently mark reserved or claimed rewards as REDEEMED
+    await tx.rewardClaim.updateMany({
+      where: {
+        orderId: order.id,
+        userId: order.userId,
+        status: { in: ['RESERVED', 'CLAIMED'] },
+      },
+      data: {
+        status: 'REDEEMED',
+        redeemedAt: new Date(),
+      },
+    });
   }
 
   /**
