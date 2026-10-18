@@ -97,42 +97,6 @@ export const MILESTONE_CONFIG: Record<
     productIds: ELIGIBLE_FREE_DRINK_IDS,
     names: ELIGIBLE_FREE_DRINKS,
   },
-  milestone_free_dessert_250: {
-    points: 250,
-    name: 'Free Dessert',
-    categories: ['cupcakes'],
-    names: [
-      'Chocolate Rich Buttercream Frosting Jar Cake',
-      'Biscoff Jar Cake',
-      'Lemon Buttercream Jar Cake',
-      'Vanilla Buttercream Cake Slice',
-      'Bailey\'s Irish Cream Jar Cake',
-      'Salted Caramel Cake',
-      'Pistachio Dream Jar Cake',
-      'Coffee Latte Jar Cake',
-    ],
-  },
-  milestone_free_loaded_fries_500: {
-    points: 500,
-    name: 'Free Loaded Fries',
-    categories: ['loaded-fries'],
-    names: [
-      'Loaded Fries',
-      'Cheese Beef Loaded Fries',
-      'Loaded BBQ Chicken Cheddar Cheese Fries',
-      'Bacon Cheddar Fries',
-    ],
-  },
-  milestone_premium_combo_750: {
-    points: 750,
-    name: 'Premium Combo',
-    categories: ['texas-crispy-chicken', 'jamaican-kitchen', 'burgers-combos'],
-  },
-  milestone_vip_reward_1000: {
-    points: 1000,
-    name: 'VIP Reward',
-    categories: ['texas-crispy-chicken', 'jamaican-kitchen', 'mexican-food', 'breakfast', 'smoothies', 'cupcakes', 'loaded-fries'],
-  },
 };
 
 export class OrderService {
