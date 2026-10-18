@@ -384,31 +384,22 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
   // =========================================================================
   describe('Step 8: Edge Cases, Concurrency, Failure, and Reversal Safeguards', () => {
     it('MUST prevent race condition double-reservation under concurrent checkout attempts', async () => {
-      // Clean up any stale ACTIVE carts from previous tests so findFirst returns our fresh cart
-      await prisma.cart.updateMany({
-        where: { userId: customerUser.id, status: 'ACTIVE' },
-        data: { status: 'ABANDONED' },
-      });
-
-      // Create a fresh AVAILABLE claim with a configured reward ID
-      const freshClaim = await prisma.rewardClaim.create({
+      // Re-enable the customer's authentic 100-point milestone claim as AVAILABLE for this concurrency test
+      const milestoneClaim = await prisma.rewardClaim.update({
+        where: {
+          userId_rewardId: {
+            userId: customerUser.id,
+            rewardId: MILESTONE_100_REWARD_ID,
+          },
+        },
         data: {
-          userId: customerUser.id,
-          rewardId: 'milestone_concurrency_test_' + Date.now(),
           status: RewardClaimStatus.AVAILABLE,
+          orderId: null,
+          reservedAt: null,
+          redeemedAt: null,
         },
       });
 
-      MILESTONE_CONFIG[freshClaim.rewardId] = {
-        points: 100,
-        name: 'Free Drink',
-        productIds: [...ELIGIBLE_FREE_DRINK_IDS],
-        names: [...ELIGIBLE_FREE_DRINKS],
-        categories: ['smoothies', 'smoothies-refreshers'],
-      };
-
-      // Create a single fresh cart — both concurrent requests will share it.
-      // The cart.updateMany atomic lock ensures one wins 201, the other gets 400.
       await populateCart([
         { menuItemId: foodMenuItem.id, quantity: 1 },
         { menuItemId: eligibleDrinkItem.id, quantity: 1 },
@@ -418,10 +409,10 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
         orderType: 'PICKUP',
         customerName: 'Staging Customer',
         customerPhone: customerPhone,
-        claimedRewardId: freshClaim.id,
+        claimedRewardId: milestoneClaim.id,
       };
 
-      // Fire 2 concurrent checkout requests
+      // Fire 2 concurrent checkout requests for the exact same reward claim
       const [res1, res2] = await Promise.all([
         request(app).post('/api/orders/checkout').set('Authorization', `Bearer ${customerToken}`).send(checkoutPayload),
         request(app).post('/api/orders/checkout').set('Authorization', `Bearer ${customerToken}`).send(checkoutPayload),
@@ -430,8 +421,27 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
       const statuses = [res1.status, res2.status].sort();
       expect(statuses).toEqual([201, 400]);
 
-      delete MILESTONE_CONFIG[freshClaim.rewardId];
-      await prisma.rewardClaim.deleteMany({ where: { id: freshClaim.id } });
+      // Verify that exactly ONE order succeeded and reserved the claim in the database
+      const successRes = res1.status === 201 ? res1 : res2;
+      const failedRes = res1.status === 400 ? res1 : res2;
+      expect(successRes.body.data?.id).toBeDefined();
+      expect(failedRes.status).toBe(400);
+
+      // Verify the database state: claim must now be RESERVED by the successful order
+      const reservedClaim = await prisma.rewardClaim.findUnique({
+        where: { id: milestoneClaim.id },
+      });
+      expect(reservedClaim?.status).toBe(RewardClaimStatus.RESERVED);
+      expect(reservedClaim?.orderId).toBe(successRes.body.data.id);
+
+      // Restore claim to REDEEMED for subsequent tests
+      await prisma.rewardClaim.update({
+        where: { id: milestoneClaim.id },
+        data: {
+          status: RewardClaimStatus.REDEEMED,
+          redeemedAt: new Date(),
+        },
+      });
     });
 
     it('MUST release RESERVED claim back to AVAILABLE when payment fails or order is cancelled', async () => {
