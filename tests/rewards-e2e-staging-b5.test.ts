@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import { createApp } from '../src/app';
 import { PrismaClient, PaymentStatus, OrderStatus, RewardTransactionType, RewardClaimStatus } from '@prisma/client';
 import { paymentService } from '../src/services/payment.service';
-import { orderService, ELIGIBLE_FREE_DRINKS, ELIGIBLE_FREE_DRINK_IDS, PROPOSED_ELIGIBLE_FREE_DRINKS, MILESTONE_100_REWARD_ID, MILESTONE_CONFIG } from '../src/services/order.service';
+import { orderService, ELIGIBLE_FREE_DRINKS, ELIGIBLE_FREE_DRINK_IDS, PROPOSED_ELIGIBLE_FREE_DRINKS, MILESTONE_100_REWARD_ID, MILESTONE_CONFIG, setFreeDrinkEligibilityApproved } from '../src/services/order.service';
 import { OtpService } from '../src/services/otp.service';
 
 const prisma = new PrismaClient();
@@ -89,6 +89,10 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
         preparationTime: 5,
       },
     });
+
+    // B5 simulates the fully approved production workflow — activate the eligibility flag
+    // so that checkout and GET /api/rewards/eligible-drinks behave as they do post-approval.
+    setFreeDrinkEligibilityApproved(true);
   });
 
   afterAll(async () => {
@@ -107,6 +111,10 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
     if (eligibleDrinkItem) await prisma.menuItem.delete({ where: { id: eligibleDrinkItem.id } }).catch(() => {});
     if (foodMenuItem) await prisma.menuItem.delete({ where: { id: foodMenuItem.id } }).catch(() => {});
     if (ineligibleDrinkItem) await prisma.menuItem.delete({ where: { id: ineligibleDrinkItem.id } }).catch(() => {});
+
+    // Restore default disabled state so this suite does not leak an enabled flag
+    // to any other suite sharing this worker process.
+    setFreeDrinkEligibilityApproved(false);
 
     await prisma.$disconnect();
   });
