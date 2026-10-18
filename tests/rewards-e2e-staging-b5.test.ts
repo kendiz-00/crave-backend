@@ -384,15 +384,31 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
   // =========================================================================
   describe('Step 8: Edge Cases, Concurrency, Failure, and Reversal Safeguards', () => {
     it('MUST prevent race condition double-reservation under concurrent checkout attempts', async () => {
-      // Create a fresh AVAILABLE claim for milestone_premium_combo_750 (foodMenuItem is eligible)
+      // Clean up any stale ACTIVE carts from previous tests so findFirst returns our fresh cart
+      await prisma.cart.updateMany({
+        where: { userId: customerUser.id, status: 'ACTIVE' },
+        data: { status: 'ABANDONED' },
+      });
+
+      // Create a fresh AVAILABLE claim with a configured reward ID
       const freshClaim = await prisma.rewardClaim.create({
         data: {
           userId: customerUser.id,
-          rewardId: 'milestone_premium_combo_750',
+          rewardId: 'milestone_concurrency_test_' + Date.now(),
           status: RewardClaimStatus.AVAILABLE,
         },
       });
 
+      MILESTONE_CONFIG[freshClaim.rewardId] = {
+        points: 100,
+        name: 'Free Drink',
+        productIds: [...ELIGIBLE_FREE_DRINK_IDS],
+        names: [...ELIGIBLE_FREE_DRINKS],
+        categories: ['smoothies', 'smoothies-refreshers'],
+      };
+
+      // Create a single fresh cart — both concurrent requests will share it.
+      // The cart.updateMany atomic lock ensures one wins 201, the other gets 400.
       await populateCart([
         { menuItemId: foodMenuItem.id, quantity: 1 },
         { menuItemId: eligibleDrinkItem.id, quantity: 1 },
@@ -414,7 +430,8 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
       const statuses = [res1.status, res2.status].sort();
       expect(statuses).toEqual([201, 400]);
 
-      await prisma.rewardClaim.delete({ where: { id: freshClaim.id } });
+      delete MILESTONE_CONFIG[freshClaim.rewardId];
+      await prisma.rewardClaim.deleteMany({ where: { id: freshClaim.id } });
     });
 
     it('MUST release RESERVED claim back to AVAILABLE when payment fails or order is cancelled', async () => {
