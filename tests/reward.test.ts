@@ -490,14 +490,47 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
     });
   });
 
-  describe('Phase 4 — Idempotency and Concurrency Tests', () => {
-    it('should safely handle duplicate referenceId idempotency', async () => {
+  describe('Phase 4 — Authorization and Transaction Integrity Tests', () => {
+    it('should reject unprivileged customer attempting to mint points via /api/rewards/transactions with 403', async () => {
+      const res = await request(app)
+        .post('/api/rewards/transactions')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          type: 'EARN',
+          points: 100,
+          reason: 'Customer trying to mint points',
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error?.message).toMatch(/insufficient permissions/i);
+    });
+
+    it('should safely handle duplicate referenceId idempotency for authorized admin', async () => {
+      // Create admin user
+      const adminPhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      const adminUser = await prisma.user.create({
+        data: {
+          phone: adminPhone.startsWith('0') ? '+233' + adminPhone.substring(1) : adminPhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
+          password: await hashPassword(TEST_PASSWORD),
+          firstName: 'Admin',
+          lastName: 'Tester',
+          role: 'ADMIN',
+        },
+      });
+
+      const adminLoginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ identifier: adminUser.phone, password: TEST_PASSWORD });
+      const adminToken = adminLoginRes.body.data.tokens.accessToken;
+
       const refId = `achievement_test_${Date.now()}`;
 
       // First request
       const res1 = await request(app)
         .post('/api/rewards/transactions')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           type: 'EARN',
           points: 50,
@@ -512,7 +545,7 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
       // Second identical request (retry)
       const res2 = await request(app)
         .post('/api/rewards/transactions')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           type: 'EARN',
           points: 50,
@@ -523,13 +556,36 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
       expect(res2.status).toBe(201);
       expect(res2.body.success).toBe(true);
       expect(res2.body.data.newBalance).toBe(balance1); // Balance remains unchanged
+
+      // Cleanup
+      await prisma.rewardTransaction.deleteMany({ where: { userId: adminUser.id } });
+      await prisma.user.delete({ where: { id: adminUser.id } });
     });
 
-    it('should allow multiple un-referenced transactions without false duplicate rejection', async () => {
+    it('should allow multiple un-referenced transactions without false duplicate rejection for admin', async () => {
+      // Create admin user
+      const adminPhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      const adminUser = await prisma.user.create({
+        data: {
+          phone: adminPhone.startsWith('0') ? '+233' + adminPhone.substring(1) : adminPhone,
+          phoneVerified: true,
+          phoneVerifiedAt: new Date(),
+          password: await hashPassword(TEST_PASSWORD),
+          firstName: 'Admin',
+          lastName: 'Tester2',
+          role: 'ADMIN',
+        },
+      });
+
+      const adminLoginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ identifier: adminUser.phone, password: TEST_PASSWORD });
+      const adminToken = adminLoginRes.body.data.tokens.accessToken;
+
       // Transaction 1 without referenceId
       const res1 = await request(app)
         .post('/api/rewards/transactions')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           type: 'EARN',
           points: 15,
@@ -541,7 +597,7 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
       // Transaction 2 without referenceId (must NOT be rejected as duplicate)
       const res2 = await request(app)
         .post('/api/rewards/transactions')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           type: 'EARN',
           points: 25,
@@ -550,36 +606,36 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
 
       expect(res2.status).toBe(201);
       expect(res2.body.data.newBalance).toBe(res1.body.data.newBalance + 25);
+
+      // Cleanup
+      await prisma.rewardTransaction.deleteMany({ where: { userId: adminUser.id } });
+      await prisma.user.delete({ where: { id: adminUser.id } });
     });
 
-    it('should handle concurrent reward requests for a new user correctly', async () => {
-      // Create new test user
-      const basePhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
-      
-      const newUser = await prisma.user.create({
+    it('should handle concurrent reward requests for an authorized admin correctly', async () => {
+      // Create admin user
+      const adminPhone = `024${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`;
+      const adminUser = await prisma.user.create({
         data: {
-          phone: basePhone.startsWith('0') ? '+233' + basePhone.substring(1) : basePhone,
+          phone: adminPhone.startsWith('0') ? '+233' + adminPhone.substring(1) : adminPhone,
           phoneVerified: true,
           phoneVerifiedAt: new Date(),
           password: await hashPassword(TEST_PASSWORD),
-          firstName: 'Concurrent',
-          lastName: 'User',
-          role: 'CUSTOMER',
+          firstName: 'Admin',
+          lastName: 'Concurrent',
+          role: 'ADMIN',
         },
       });
 
-      const loginRes = await request(app)
+      const adminLoginRes = await request(app)
         .post('/api/auth/login')
-        .send({
-          identifier: newUser.phone,
-          password: TEST_PASSWORD,
-        });
-      const newToken = loginRes.body.data.tokens.accessToken;
+        .send({ identifier: adminUser.phone, password: TEST_PASSWORD });
+      const adminToken = adminLoginRes.body.data.tokens.accessToken;
 
       // Launch 2 simultaneous requests
       const reqA = request(app)
         .post('/api/rewards/transactions')
-        .set('Authorization', `Bearer ${newToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           type: 'EARN',
           points: 50,
@@ -589,7 +645,7 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
 
       const reqB = request(app)
         .post('/api/rewards/transactions')
-        .set('Authorization', `Bearer ${newToken}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           type: 'EARN',
           points: 50,
@@ -605,13 +661,13 @@ describe('Reward Endpoints (Updated for Phone Verification)', () => {
       // Verify that final balance equals sum of both transactions (100)
       const finalRes = await request(app)
         .get('/api/rewards')
-        .set('Authorization', `Bearer ${newToken}`);
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(finalRes.body.data.points).toBe(100);
 
       // Cleanup
-      await prisma.rewardTransaction.deleteMany({ where: { userId: newUser.id } });
-      await prisma.user.delete({ where: { id: newUser.id } });
+      await prisma.rewardTransaction.deleteMany({ where: { userId: adminUser.id } });
+      await prisma.user.delete({ where: { id: adminUser.id } });
     });
   });
 });

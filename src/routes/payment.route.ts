@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authenticate } from '../middleware/auth.middleware';
@@ -78,9 +79,9 @@ router.post(
       return;
     }
     
-    // Calculate HMAC SHA512 hash
-    const crypto = require('crypto');
-    const hash = crypto.createHmac('sha512', secretKey).update(JSON.stringify(req.body)).digest('hex');
+    // Calculate HMAC SHA512 hash using exact raw payload buffer
+    const rawPayload = (req as any).rawBody || JSON.stringify(req.body);
+    const hash = crypto.createHmac('sha512', secretKey).update(rawPayload).digest('hex');
     
     if (hash !== signature) {
       res.status(401).json({

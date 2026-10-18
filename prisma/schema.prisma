@@ -442,7 +442,9 @@ model Payment {
 
 // Enum for reward claim status
 enum RewardClaimStatus {
+  AVAILABLE
   CLAIMED
+  RESERVED
   REDEEMED
 }
 
@@ -453,6 +455,7 @@ model RewardClaim {
   rewardId   String
   status     RewardClaimStatus @default(CLAIMED)
   claimedAt  DateTime          @default(now())
+  reservedAt DateTime?
   redeemedAt DateTime?
   orderId    String?
   createdAt  DateTime          @default(now())
@@ -465,6 +468,7 @@ model RewardClaim {
   @@index([userId])
   @@index([status])
   @@index([orderId])
+  @@index([orderId, status])
 }
 
 // PhoneVerification model for OTP verification

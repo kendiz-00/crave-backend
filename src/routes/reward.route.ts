@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { orderController } from '../controllers';
 import { authenticate } from '../middleware/auth.middleware';
+import { authorize } from '../middleware/authorization.middleware';
 
 const router = Router();
 
@@ -30,10 +31,10 @@ router.get('/history', orderController.getRewardHistory);
 
 /**
  * @route   POST /api/rewards/transactions
- * @desc    Create a reward transaction for the authenticated user
- * @access  Private
+ * @desc    Create a reward transaction (Admin/Owner only - prevents arbitrary point minting)
+ * @access  Private (Admin/Owner)
  */
-router.post('/transactions', orderController.createRewardTransaction);
+router.post('/transactions', authorize('ADMIN', 'OWNER'), orderController.createRewardTransaction);
 
 /**
  * @route   POST /api/rewards/claims
