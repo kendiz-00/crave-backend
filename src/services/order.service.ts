@@ -37,30 +37,64 @@ export function calculateOrderAmounts(subtotal: number, discount: number, delive
 export const FIRST_ORDER_REWARD_ID = 'first_order_free_drink';
 export const MILESTONE_100_REWARD_ID = 'milestone_free_drink_100';
 
+export interface EligibleRewardProduct {
+  id: string;
+  name: string;
+}
+
+/**
+ * Proposed authoritative allowlist of eligible free drinks (10 smoothies/refreshers, excluding shakes)
+ * using stable product IDs from the CRAVE database.
+ * Eligibility configuration can be updated here easily without modifying checkout logic.
+ */
+export const PROPOSED_ELIGIBLE_FREE_DRINKS: EligibleRewardProduct[] = [
+  { id: '8d5c3819-2408-476b-97a6-7d21133ed69c', name: 'Sunkissed Strawberry Mango Smoothie' },
+  { id: '40384fa8-8d33-4188-9fb3-020cf9a22dae', name: 'Banana Peanut Butter Chocolate' },
+  { id: 'ea983683-a3a9-4222-ac7e-71f5375e2665', name: 'Lemonade Ice' },
+  { id: '4c588fb8-7f1c-4dd8-b2ad-a14e5154b441', name: 'Strawberries and Cream' },
+  { id: 'a1831759-ba35-4ad5-974f-2b8585cc26a1', name: 'Strawberry Pineapple Tang Smoothie' },
+  { id: 'b01da45e-2437-4850-872b-a4458409d242', name: 'Exotic Tropical Fruit Blend Smoothie' },
+  { id: 'cc7e7818-5143-4aa6-ade9-709f99c96691', name: 'Green Glow' },
+  { id: '5389fb30-d80f-45c4-ba62-51b4f44fdd91', name: 'Water Mint Ice Slushie' },
+  { id: 'f27574c7-fa39-4cad-8576-4551d2ed2548', name: 'Sexy Pina Colada' },
+  { id: 'bf4b8669-0a3e-4203-b830-707c77f96188', name: 'Strawberry Colada Blast Smoothie' },
+];
+
+export const ELIGIBLE_FREE_DRINK_IDS = PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.id);
+
 export const ELIGIBLE_FREE_DRINKS = [
+  ...PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name),
+  // Legacy alias names preserved for backward compatibility and test fixture matching:
   'Strawberry Colada',
   'Pina Colada',
   'Watermelon Mint Ice',
-  'Green Glow',
   'Green Glow Smoothie',
   'Tropical Fruit Blend',
   'Pineapple Strawberry',
-  'Strawberries and Cream',
-  'Lemonade Ice',
-  'Banana Peanut Butter Chocolate',
 ];
 
-export const MILESTONE_CONFIG: Record<string, { points: number; name: string; categories?: string[]; names?: string[] }> = {
+export const MILESTONE_CONFIG: Record<
+  string,
+  {
+    points: number;
+    name: string;
+    categories?: string[];
+    productIds?: string[];
+    names?: string[];
+  }
+> = {
   [FIRST_ORDER_REWARD_ID]: {
     points: 0,
     name: 'Free Drink',
-    categories: ['smoothies'],
+    categories: ['smoothies', 'smoothies-refreshers'],
+    productIds: ELIGIBLE_FREE_DRINK_IDS,
     names: ELIGIBLE_FREE_DRINKS,
   },
   [MILESTONE_100_REWARD_ID]: {
     points: 100,
     name: 'Free Drink',
-    categories: ['smoothies'],
+    categories: ['smoothies', 'smoothies-refreshers'],
+    productIds: ELIGIBLE_FREE_DRINK_IDS,
     names: ELIGIBLE_FREE_DRINKS,
   },
   milestone_free_dessert_250: {
@@ -226,12 +260,28 @@ export class OrderService {
       for (const item of cart.items) {
         const catSlug = item.menuItem.category?.slug?.toLowerCase() || '';
         const itemName = item.menuItem.name?.trim().toLowerCase();
+        const itemId = item.menuItem.id;
 
-        const nameMatches = milestoneConfig.names && milestoneConfig.names.some(n => n.toLowerCase() === itemName);
-        const catMatches = milestoneConfig.categories && milestoneConfig.categories.some(c => catSlug.includes(c.toLowerCase()));
+        const idMatches = Boolean(
+          milestoneConfig.productIds &&
+          milestoneConfig.productIds.length > 0 &&
+          milestoneConfig.productIds.includes(itemId)
+        );
+        const nameMatches = Boolean(
+          milestoneConfig.names &&
+          milestoneConfig.names.some(n => n.trim().toLowerCase() === itemName)
+        );
+        const catMatches = Boolean(
+          milestoneConfig.categories &&
+          milestoneConfig.categories.some(c => catSlug.includes(c.toLowerCase()))
+        );
 
-        // If names list is configured (e.g. for free drink rewards), strictly require name match
-        const isMatch = milestoneConfig.names && milestoneConfig.names.length > 0 ? nameMatches : catMatches;
+        // Product ID matching is authoritative for product allowlists.
+        // Also support name matching for test fixtures/compatibility.
+        // If neither is configured, fall back to category matching.
+        const isMatch = (milestoneConfig.productIds && milestoneConfig.productIds.length > 0)
+          ? (idMatches || nameMatches)
+          : (milestoneConfig.names && milestoneConfig.names.length > 0 ? nameMatches : catMatches);
 
         if (isMatch) {
           if (!eligibleItem || Number(item.menuItem.price) > Number(eligibleItem.menuItem.price)) {

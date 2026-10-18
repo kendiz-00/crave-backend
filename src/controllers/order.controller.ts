@@ -4,7 +4,7 @@ import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema, 
 import { asyncHandler } from '../middleware/asyncHandler';
 import { ApiError } from '@/types/errors';
 import { config } from '@/config';
-import { ELIGIBLE_FREE_DRINKS } from '../services/order.service';
+import { ELIGIBLE_FREE_DRINK_IDS, PROPOSED_ELIGIBLE_FREE_DRINKS } from '../services/order.service';
 
 export class OrderController {
   /**
@@ -238,7 +238,9 @@ export class OrderController {
       success: true,
       data: {
         rewardId: 'milestone_free_drink_100',
-        eligibleDrinks: ELIGIBLE_FREE_DRINKS,
+        eligibleProductIds: ELIGIBLE_FREE_DRINK_IDS,
+        eligibleDrinks: PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name),
+        items: PROPOSED_ELIGIBLE_FREE_DRINKS,
       },
     });
   });

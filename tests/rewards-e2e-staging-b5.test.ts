@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import { createApp } from '../src/app';
 import { PrismaClient, PaymentStatus, OrderStatus, RewardTransactionType, RewardClaimStatus } from '@prisma/client';
 import { paymentService } from '../src/services/payment.service';
-import { orderService, ELIGIBLE_FREE_DRINKS, MILESTONE_100_REWARD_ID, MILESTONE_CONFIG } from '../src/services/order.service';
+import { orderService, ELIGIBLE_FREE_DRINKS, ELIGIBLE_FREE_DRINK_IDS, PROPOSED_ELIGIBLE_FREE_DRINKS, MILESTONE_100_REWARD_ID, MILESTONE_CONFIG } from '../src/services/order.service';
 import { OtpService } from '../src/services/otp.service';
 
 const prisma = new PrismaClient();
@@ -312,7 +312,7 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
       expect(order.items.length).toBe(2);
       const drinkItem = order.items.find((it: any) => it.menuItemId === eligibleDrinkItem.id);
       expect(drinkItem).toBeDefined();
-      expect(drinkItem.snapshotName).toBe('Strawberry Colada');
+      expect(drinkItem.snapshotName).toBe(eligibleDrinkItem.name);
       expect(drinkItem.quantity).toBe(1);
 
       // Verify Reservation: Claim transitioned to RESERVED and bound to this order
@@ -732,7 +732,7 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
       await prisma.rewardClaim.delete({ where: { id: legacyClaim.id } });
     });
 
-    it('MUST expose GET /api/rewards/eligible-drinks with the exact 10 approved smoothies', async () => {
+    it('MUST expose GET /api/rewards/eligible-drinks with the exact 10 approved smoothies and product IDs', async () => {
       const res = await request(app)
         .get('/api/rewards/eligible-drinks')
         .set('Authorization', `Bearer ${customerToken}`);
@@ -740,7 +740,10 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.eligibleDrinks.length).toBe(10);
-      expect(res.body.data.eligibleDrinks).toEqual(ELIGIBLE_FREE_DRINKS);
+      expect(res.body.data.eligibleProductIds.length).toBe(10);
+      expect(res.body.data.items.length).toBe(10);
+      expect(res.body.data.eligibleDrinks).toEqual(PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name));
+      expect(res.body.data.eligibleProductIds).toEqual(ELIGIBLE_FREE_DRINK_IDS);
     });
   });
 
@@ -767,6 +770,7 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
       MILESTONE_CONFIG[claim.rewardId] = {
         points: 100,
         name: 'Free Drink',
+        productIds: ELIGIBLE_FREE_DRINK_IDS,
         names: ELIGIBLE_FREE_DRINKS,
       };
 
@@ -786,6 +790,126 @@ describe('Phase B5 — End-to-End Staging Verification Suite', () => {
 
       delete MILESTONE_CONFIG[claim.rewardId];
       await prisma.rewardClaim.delete({ where: { id: claim.id } });
+    });
+
+    it('MUST strictly reject excluded shakes when attempted as free drinks', async () => {
+      const excludedShake = await prisma.menuItem.upsert({
+        where: { slug: 'strawberry-bliss-shake-test' },
+        update: {},
+        create: {
+          id: 'f6ff9d1d-5c82-4d3e-8313-d2ce0284fd73',
+          name: 'Strawberry Bliss Shake',
+          slug: 'strawberry-bliss-shake-test',
+          price: 45.99,
+          imageUrl: 'images/strawberry_bliss.jpg',
+          preparationTime: 5,
+          categoryId: category.id,
+          isAvailable: true,
+          description: 'Excluded shake from free drink offer',
+        },
+      });
+
+      const claim = await prisma.rewardClaim.create({
+        data: {
+          userId: customerUser.id,
+          rewardId: 'test_claim_shake_' + Date.now(),
+          status: RewardClaimStatus.AVAILABLE,
+        },
+      });
+
+      await populateCart([
+        { menuItemId: foodMenuItem.id, quantity: 1 },
+        { menuItemId: excludedShake.id, quantity: 1 },
+      ]);
+
+      MILESTONE_CONFIG[claim.rewardId] = {
+        points: 100,
+        name: 'Free Drink',
+        productIds: ELIGIBLE_FREE_DRINK_IDS,
+        names: PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name),
+      };
+
+      const checkoutRes = await request(app)
+        .post('/api/orders/checkout')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({
+          orderType: 'PICKUP',
+          customerName: 'Staging Customer',
+          customerPhone: customerPhone,
+          claimedRewardId: claim.id,
+        });
+
+      expect(checkoutRes.status).toBe(400);
+      const errMsg = checkoutRes.body.error?.message || checkoutRes.body.message;
+      expect(errMsg).toContain('does not contain an item eligible for Free Drink');
+
+      delete MILESTONE_CONFIG[claim.rewardId];
+      await prisma.rewardClaim.delete({ where: { id: claim.id } });
+    });
+
+    it('MUST successfully discount each of the 10 proposed eligible drinks to GH₵0 for exactly 1 unit', async () => {
+      // Test all 10 products
+      for (const prod of PROPOSED_ELIGIBLE_FREE_DRINKS) {
+        // Upsert menu item with authoritative ID
+        const drinkItem = await prisma.menuItem.upsert({
+          where: { id: prod.id },
+          update: { isAvailable: true, isDeleted: false },
+          create: {
+            id: prod.id,
+            name: prod.name,
+            slug: 'test-slug-' + prod.id.substring(0, 8),
+            price: 35.00,
+            imageUrl: 'images/test_drink.jpg',
+            preparationTime: 5,
+            categoryId: category.id,
+            isAvailable: true,
+            description: 'Approved test smoothie',
+          },
+        });
+
+        const testClaim = await prisma.rewardClaim.create({
+          data: {
+            userId: customerUser.id,
+            rewardId: 'test_claim_prod_' + prod.id.substring(0, 8) + '_' + Date.now(),
+            status: RewardClaimStatus.AVAILABLE,
+          },
+        });
+
+        // Cart contains food + 1 unit of this eligible drink
+        await populateCart([
+          { menuItemId: foodMenuItem.id, quantity: 1 },
+          { menuItemId: drinkItem.id, quantity: 1 },
+        ]);
+
+        MILESTONE_CONFIG[testClaim.rewardId] = {
+          points: 100,
+          name: 'Free Drink',
+          productIds: ELIGIBLE_FREE_DRINK_IDS,
+          names: ELIGIBLE_FREE_DRINKS,
+        };
+
+        const checkoutRes = await request(app)
+          .post('/api/orders/checkout')
+          .set('Authorization', `Bearer ${customerToken}`)
+          .send({
+            orderType: 'PICKUP',
+            customerName: 'Staging Customer',
+            customerPhone: customerPhone,
+            claimedRewardId: testClaim.id,
+          });
+
+        expect(checkoutRes.status).toBe(201);
+        const orderData = checkoutRes.body.data;
+        const drinkPrice = Number(drinkItem.price);
+        expect(Number(orderData.discount)).toBe(drinkPrice);
+
+        // Verify kitchen order and receipt items
+        const kitchenDrink = orderData.items.find((it: any) => it.menuItemId === drinkItem.id);
+        expect(kitchenDrink).toBeDefined();
+        expect(kitchenDrink.snapshotName).toBe(prod.name);
+
+        delete MILESTONE_CONFIG[testClaim.rewardId];
+      }
     });
   });
 });
