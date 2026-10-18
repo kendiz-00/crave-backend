@@ -6,23 +6,30 @@ services:
   - type: web
     name: crave-backend
     env: docker
-    region: oregon
+    # The existing production Web Service and replacement database are in Ohio.
+    region: ohio
     plan: starter
     # Docker build and start commands are handled by Dockerfile
     envVars:
       # Node Environment
       - key: NODE_ENV
         value: production
+
+      - key: PAYMENT_MODE
+        value: live
+
+      - key: PUBLIC_API_URL
+        value: https://crave-backend-oie3.onrender.com
+
       
       # Port (Render automatically sets PORT)
       - key: PORT
         value: 4000
       
-      # Database URL (Render PostgreSQL)
+      # Set securely in the existing Render service dashboard after verifying
+      # crave-db-v2. Do not Blueprint-manage or auto-bind the database here.
       - key: DATABASE_URL
-        fromDatabase:
-          name: crave-db
-          property: connectionString
+        sync: false
       
       # JWT Secrets (Set in Render dashboard)
       - key: JWT_SECRET
@@ -54,7 +61,7 @@ services:
 
       # CORS Configuration
       - key: CORS_ALLOWED_ORIGINS
-        value: https://crave-frontend.vercel.app,https://crave-staging.vercel.app,https://crave.vercel.app,https://crave.com
+        value: https://crave-frontend.vercel.app,https://crave.vercel.app,https://crave.com,https://www.crave.com,https://craveghana.com,https://www.craveghana.com
       
       # Rate Limiting
       - key: RATE_LIMIT_WINDOW_MS
@@ -69,11 +76,3 @@ services:
       # Client URL
       - key: CLIENT_URL
         value: https://crave-frontend.vercel.app
-
-# PostgreSQL Database
-databases:
-  - name: crave-db
-    databaseName: crave_db
-    user: crave_user
-    plan: starter
-    region: oregon

@@ -60,5 +60,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Run migrations and start application
-CMD ["sh", "-c", "NODE_ENV=production npx prisma migrate deploy && node dist/server.js"]
+# Migrations are run as a separately controlled release operation.
+CMD ["node", "dist/server.js"]

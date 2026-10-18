@@ -2,11 +2,15 @@ import { validateEnv } from '@/validators/env.validator';
 
 const env = validateEnv();
 
-const defaultAllowedOrigins = [
-  'https://craveghana.com',
-  'https://www.craveghana.com',
-  'https://crave-frontend.vercel.app',
-];
+const defaultAllowedOrigins = env.NODE_ENV === 'production'
+  ? [
+      'https://craveghana.com',
+      'https://www.craveghana.com',
+      'https://crave-frontend.vercel.app',
+    ]
+  : env.NODE_ENV === 'staging'
+    ? []
+    : ['http://localhost:3000', 'http://localhost:5173'];
 
 const configuredOrigins = env.CORS_ALLOWED_ORIGINS.split(',')
   .map((origin) => origin.trim())
@@ -21,6 +25,8 @@ export const config = {
     secret: env.JWT_SECRET,
   },
   nodeEnv: env.NODE_ENV,
+  paymentMode: env.PAYMENT_MODE || (env.NODE_ENV === 'production' ? 'live' : undefined),
+  publicApiUrl: env.PUBLIC_API_URL,
   cors: {
     allowedOrigins: Array.from(
       new Set([...defaultAllowedOrigins, ...configuredOrigins])

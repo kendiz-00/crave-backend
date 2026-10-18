@@ -9,8 +9,87 @@ build
 
 # Environment files
 .env
+.env.*
 .env.local
 .env.*.local
+**/.env
+**/.env.*
+
+# Credentials and private material
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.secret
+*.secrets
+*.asc
+*.gpg
+.npmrc
+.netrc
+.pgpass
+.my.cnf
+**/.ssh/**
+**/id_rsa*
+**/id_ed25519*
+**/secrets/**
+**/private/**
+**/credentials/**
+
+# Local database exports and snapshots
+*.sql
+*.dump
+*.backup
+*.bak
+*.sqlite
+*.sqlite3
+*.db
+!prisma/migrations/**/*.sql
+/api-menu-response.json
+/current-menu.json
+/menu.json
+/menu-images-audit.json
+/production-menu*.json
+
+# Local database audit scripts (may contain credential-bearing connection URLs)
+/audit-*.js
+/audit-*.ts
+/direct-*-test.*
+/audit-production-categories-prod.js
+/direct-pg-test.js
+/direct-prisma-test.js
+/direct-prisma-test.ts
+/qa-*.js
+/qa-*.ts
+/verify-*.js
+/verify-*.ts
+/check-*.js
+/check-*.ts
+/diagnose-*.js
+/diagnose-*.ts
+/compare-*.js
+/compare-*.ts
+/debug-*.js
+/debug-*.ts
+/extract-*.js
+/extract-*.ts
+/investigate-*.js
+/investigate-*.ts
+/legacy-product-*.js
+/legacy-product-*.ts
+/map-*.js
+/map-*.ts
+/phase*.js
+/phase*.ts
+/restore-*.js
+/restore-*.ts
+/validate-*.js
+/validate-*.ts
+/get-category-ids.js
+/get-category-ids.ts
+/replacement-*.js
+/replacement-*.ts
+/migrations/
 
 # IDE
 .vscode
@@ -30,6 +109,11 @@ Thumbs.db
 # Testing
 coverage
 .nyc_output
+tests
+**/tests/**
+**/__tests__/**
+*.test.*
+*.spec.*
 *.test.ts
 *.spec.ts
 __tests__
