@@ -132,6 +132,27 @@ describe('environment separation validation', () => {
     })).toThrow('SMS_PROVIDER');
   });
 
+  it('accepts BulkClix as approved production SMS provider with configured credentials', () => {
+    const bulkClixEnv: NodeJS.ProcessEnv = {
+      ...baseEnv,
+      NODE_ENV: 'production',
+      PAYMENT_MODE: 'live',
+      PUBLIC_API_URL: 'https://crave-backend-oie3.onrender.com',
+      DATABASE_URL: 'postgresql://user:password@db.internal:5432/crave_db',
+      PAYSTACK_PUBLIC_KEY: 'pk_live_PUBLICKEY123',
+      PAYSTACK_SECRET_KEY: 'sk_live_SECRETKEY123',
+      SMS_PROVIDER: 'bulkclix',
+      BULKCLIX_API_KEY: 'test-bulkclix-api-key',
+      BULKCLIX_SENDER_ID: 'CRAVE',
+      AFRICAS_TALKING_USERNAME: undefined,
+      AFRICAS_TALKING_API_KEY: undefined,
+      CORS_ALLOWED_ORIGINS: 'https://craveghana.com',
+      CLIENT_URL: 'https://craveghana.com',
+    };
+
+    expect(validateEnv(bulkClixEnv).SMS_PROVIDER).toBe('bulkclix');
+  });
+
   it('keeps production deployment config aligned with the validator', () => {
     const renderConfig = fs.readFileSync(path.resolve(__dirname, '../../render.yaml'), 'utf8');
     const productionExample = fs.readFileSync(path.resolve(__dirname, '../../.env.production.example'), 'utf8');
@@ -145,9 +166,9 @@ describe('environment separation validation', () => {
     expect(corsLine).not.toContain('staging');
     expect(corsLine).toContain('https://crave.vercel.app');
     expect(corsLine).toContain('https://www.craveghana.com');
-    expect(productionExample).toContain('SMS_PROVIDER=africas_talking');
-    expect(productionExample).toContain('AFRICAS_TALKING_USERNAME=your_username');
-    expect(productionExample).toContain('AFRICAS_TALKING_API_KEY=your_api_key');
+    expect(productionExample).toContain('SMS_PROVIDER=bulkclix');
+    expect(productionExample).toContain('BULKCLIX_API_KEY=your_bulkclix_api_key');
+    expect(productionExample).toContain('BULKCLIX_SENDER_ID=CRAVE');
     expect(stagingExample).toContain('SMS_PROVIDER=africas_talking');
     expect(stagingExample).toContain('AFRICAS_TALKING_USERNAME=your_username');
     expect(stagingExample).toContain('AFRICAS_TALKING_API_KEY=your_api_key');

@@ -24,9 +24,11 @@ const envSchema = z.object({
   PUBLIC_API_URL: z.string().url().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().startsWith('pk_').optional(),
   PAYSTACK_SECRET_KEY: z.string().startsWith('sk_').optional(),
-  SMS_PROVIDER: z.enum(['africas_talking', 'africastalking', 'test']).optional(),
+  SMS_PROVIDER: z.enum(['africas_talking', 'africastalking', 'bulkclix', 'bulk_clix', 'test']).optional(),
   AFRICAS_TALKING_USERNAME: z.string().optional(),
   AFRICAS_TALKING_API_KEY: z.string().optional(),
+  BULKCLIX_API_KEY: z.string().optional(),
+  BULKCLIX_SENDER_ID: z.string().optional(),
   CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:3000,https://craveghana.com,https://www.craveghana.com,https://crave-frontend.vercel.app'),
   CLIENT_URL: z.string().url().optional().default('https://craveghana.com'),
   RATE_LIMIT_WINDOW_MS: z
@@ -46,14 +48,27 @@ const envSchema = z.object({
   const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\/+/, '').split('/')[0] || '').toLowerCase();
   const apiHost = env.PUBLIC_API_URL ? new URL(env.PUBLIC_API_URL).hostname.toLowerCase() : '';
   const configuredOrigins = env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean);
-  const smsCredentialsConfigured = Boolean(
+  
+  const isAfricasTalking = env.SMS_PROVIDER === 'africas_talking' || env.SMS_PROVIDER === 'africastalking';
+  const isBulkClix = env.SMS_PROVIDER === 'bulkclix' || env.SMS_PROVIDER === 'bulk_clix';
+  const isApprovedSmsProvider = isAfricasTalking || isBulkClix;
+
+  const africasTalkingConfigured = Boolean(
     env.AFRICAS_TALKING_USERNAME?.trim() &&
     env.AFRICAS_TALKING_API_KEY?.trim() &&
     !/^(your_|replace|placeholder|example)/i.test(env.AFRICAS_TALKING_USERNAME.trim()) &&
     !/^(your_|replace|placeholder|example)/i.test(env.AFRICAS_TALKING_API_KEY.trim())
   );
-  const isApprovedSmsProvider = env.SMS_PROVIDER === 'africas_talking' ||
-    env.SMS_PROVIDER === 'africastalking';
+
+  const bulkClixConfigured = Boolean(
+    env.BULKCLIX_API_KEY?.trim() &&
+    env.BULKCLIX_SENDER_ID?.trim() &&
+    !/^(your_|replace|placeholder|example)/i.test(env.BULKCLIX_API_KEY.trim()) &&
+    !/^(your_|replace|placeholder|example)/i.test(env.BULKCLIX_SENDER_ID.trim())
+  );
+
+  const smsCredentialsConfigured = (isAfricasTalking && africasTalkingConfigured) ||
+    (isBulkClix && bulkClixConfigured);
   const originHosts = configuredOrigins.map((origin) => {
     try {
       const parsedOrigin = new URL(origin);
@@ -108,7 +123,7 @@ const envSchema = z.object({
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['SMS_PROVIDER'],
-        message: "Staging requires the approved Africa's Talking provider and configured credentials.",
+        message: "Staging requires an approved SMS provider (BulkClix or Africa's Talking) and configured credentials.",
       });
     }
     if (new URL(env.CLIENT_URL).protocol !== 'https:' ||
@@ -157,7 +172,7 @@ const envSchema = z.object({
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['SMS_PROVIDER'],
-        message: "Production requires the approved Africa's Talking provider and configured credentials.",
+        message: "Production requires an approved SMS provider (BulkClix or Africa's Talking) and configured credentials.",
       });
     }
     if (new URL(env.CLIENT_URL).protocol !== 'https:' ||
