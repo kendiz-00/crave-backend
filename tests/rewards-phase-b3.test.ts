@@ -237,6 +237,18 @@ describe('Phase B3 Core Order & Payment Service Refactor Tests', () => {
         });
         expect(transactions.length).toBe(1);
 
+        // Safeguard 1: Duplicate webhook delivery MUST NOT award duplicate points
+        await paymentService.handleWebhook({
+          event: 'charge.success',
+          data: { reference: payment.reference },
+        });
+        const afterWebhookUser = await prisma.user.findUnique({ where: { id: customerUser.id } });
+        expect(afterWebhookUser?.lifetimePointsEarned).toBe(126);
+        const webhookTransactions = await prisma.rewardTransaction.findMany({
+          where: { userId: customerUser.id, orderId: order.id },
+        });
+        expect(webhookTransactions.length).toBe(1);
+
         // Rule 9: Reaching 200+ points must NOT recreate the milestone 100 claim
         await prisma.$transaction(async (tx) => {
           await tx.user.update({
@@ -442,6 +454,22 @@ describe('Phase B3 Core Order & Payment Service Refactor Tests', () => {
       expect(reuseRes.status).toBe(400);
       const reuseErrMsg = reuseRes.body.error?.message || reuseRes.body.message;
       expect(reuseErrMsg).toContain('not available for redemption');
+    });
+
+    it('MUST verify points balance has zero deductions from unlocking, applying, and redeeming the free drink', async () => {
+      // Get user's full rewards state
+      const fullRewards = await orderService.getUserFullRewards(customerUser.id);
+      // User earned 70 pts from the paid meal portion of the order (126 + 70 = 196), with 0 pts deducted for the drink
+      expect(fullRewards.points).toBe(196);
+
+      // Verify no REDEEM transaction was ever created for the free drink entitlement
+      const milestoneRedeemTx = await prisma.rewardTransaction.findFirst({
+        where: {
+          userId: customerUser.id,
+          type: RewardTransactionType.REDEEM,
+        },
+      });
+      expect(milestoneRedeemTx).toBeNull();
     });
   });
 
