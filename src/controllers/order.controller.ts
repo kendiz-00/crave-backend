@@ -4,7 +4,12 @@ import { createOrderSchema, updateOrderStatusSchema, updatePaymentStatusSchema, 
 import { asyncHandler } from '../middleware/asyncHandler';
 import { ApiError } from '@/types/errors';
 import { config } from '@/config';
-import { ELIGIBLE_FREE_DRINK_IDS, PROPOSED_ELIGIBLE_FREE_DRINKS, IS_FREE_DRINK_ELIGIBILITY_APPROVED } from '../services/order.service';
+import {
+  ELIGIBLE_FREE_DRINK_IDS,
+  PROPOSED_ELIGIBLE_FREE_DRINKS,
+  IS_FREE_DRINK_REDEMPTION_ENABLED,
+  RESERVATION_EXPIRATION_MS,
+} from '../services/order.service';
 
 export class OrderController {
   /**
@@ -234,17 +239,45 @@ export class OrderController {
    * The frontend must consume this list and must not maintain a conflicting local copy.
    */
   getEligibleDrinks = asyncHandler(async (_req: Request, res: Response) => {
-    const isApproved = IS_FREE_DRINK_ELIGIBILITY_APPROVED;
+    const isEnabled = IS_FREE_DRINK_REDEMPTION_ENABLED;
     res.status(200).json({
       success: true,
       data: {
         rewardId: 'milestone_free_drink_100',
-        isApproved,
-        status: isApproved ? 'ACTIVE' : 'PENDING_BUSINESS_APPROVAL',
-        eligibleProductIds: isApproved ? ELIGIBLE_FREE_DRINK_IDS : [],
-        eligibleDrinks: isApproved ? PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name) : [],
-        items: isApproved ? PROPOSED_ELIGIBLE_FREE_DRINKS : [],
+        redemptionEnabled: isEnabled,
+        isApproved: isEnabled,
+        status: isEnabled ? 'ACTIVE' : 'PENDING_BUSINESS_APPROVAL',
+        code: isEnabled ? 'REDEMPTION_ACTIVE' : 'REWARD_REDEMPTION_DISABLED',
+        message: isEnabled
+          ? 'Free drink reward redemption is active'
+          : 'Free drink reward redemption is currently disabled pending business activation.',
+        eligibleProductIds: isEnabled ? ELIGIBLE_FREE_DRINK_IDS : [],
+        eligibleDrinks: isEnabled ? PROPOSED_ELIGIBLE_FREE_DRINKS.map((d) => d.name) : [],
+        items: isEnabled ? PROPOSED_ELIGIBLE_FREE_DRINKS : [],
         proposedItems: PROPOSED_ELIGIBLE_FREE_DRINKS,
+      },
+    });
+  });
+
+  /**
+   * GET /rewards/redemption-status
+   * Administrative verification mechanism to inspect free drink redemption feature flag status
+   * without exposing secret configuration keys or environment credentials.
+   */
+  getRedemptionStatus = asyncHandler(async (_req: Request, res: Response) => {
+    const isEnabled = IS_FREE_DRINK_REDEMPTION_ENABLED;
+    res.status(200).json({
+      success: true,
+      data: {
+        redemptionEnabled: isEnabled,
+        status: isEnabled ? 'ACTIVE' : 'DISABLED',
+        code: isEnabled ? 'REDEMPTION_ACTIVE' : 'REWARD_REDEMPTION_DISABLED',
+        message: isEnabled
+          ? 'Customer free-drink redemption is currently ENABLED.'
+          : 'Customer free-drink redemption is currently DISABLED (Rollout Stage 1 / Non-negotiable control).',
+        reservationTtlSeconds: RESERVATION_EXPIRATION_MS / 1000,
+        proposedEligibleDrinksCount: PROPOSED_ELIGIBLE_FREE_DRINKS.length,
+        featureFlagSource: 'REWARDS_FREE_DRINK_REDEMPTION_ENABLED',
       },
     });
   });

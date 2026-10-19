@@ -146,22 +146,25 @@ describe('Release Blockers Verification: Drink Approval Toggle & Reservation Rec
         },
       });
 
-      await createCartForUser();
+      try {
+        await createCartForUser();
 
-      const res = await request(app)
-        .post('/api/orders/checkout')
-        .set('Authorization', `Bearer ${testToken}`)
-        .send({
-          orderType: 'PICKUP',
-          customerName: 'Reconcile Tester',
-          customerPhone: testUser.phone,
-          claimedRewardId: claim.id,
-        });
+        const res = await request(app)
+          .post('/api/orders/checkout')
+          .set('Authorization', `Bearer ${testToken}`)
+          .send({
+            orderType: 'PICKUP',
+            customerName: 'Reconcile Tester',
+            customerPhone: testUser.phone,
+            claimedRewardId: claim.id,
+          });
 
-      expect(res.status).toBe(400);
-      expect(res.body.error?.message || res.body.message).toContain('pending business approval');
-
-      await prisma.rewardClaim.delete({ where: { id: claim.id } });
+        expect(res.status).toBe(400);
+        const errMsg = res.body.error?.message || res.body.message || '';
+        expect(errMsg).toContain('Free drink reward redemption is currently disabled');
+      } finally {
+        await prisma.rewardClaim.deleteMany({ where: { id: claim.id } });
+      }
     });
 
     it('MUST activate eligible drinks and allow checkout once explicitly approved', async () => {

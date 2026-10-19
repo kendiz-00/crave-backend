@@ -51,6 +51,7 @@ export const errorHandler = (
     res.status(err.statusCode).json({
       error: {
         message: err.message,
+        ...(err.code && { code: err.code }),
         ...(config.isDevelopment && { stack: err.stack }),
       },
     });

@@ -38,6 +38,14 @@ router.get('/history', orderController.getRewardHistory);
 router.get('/eligible-drinks', orderController.getEligibleDrinks);
 
 /**
+ * @route   GET /api/rewards/redemption-status
+ * @desc    Get the administrative verification status of the free-drink redemption feature flag
+ *          without exposing secret keys or environment variables.
+ * @access  Private
+ */
+router.get('/redemption-status', orderController.getRedemptionStatus);
+
+/**
  * @route   POST /api/rewards/transactions
  * @desc    Create a reward transaction (Admin/Owner only - prevents arbitrary point minting)
  * @access  Private (Admin/Owner)

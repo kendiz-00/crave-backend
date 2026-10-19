@@ -74,14 +74,35 @@ export const ELIGIBLE_FREE_DRINKS = [
 ];
 
 /**
- * Feature flag controlling whether the free drink eligibility list has received explicit business approval.
- * Disabled (false) by default in production.
- * Can be activated by setting REWARDS_ELIGIBLE_DRINKS_ENABLED=true in environment or calling setFreeDrinkEligibilityApproved(true).
+ * Feature flag controlling whether customer free drink reward redemption is active.
+ * Environment variable: REWARDS_FREE_DRINK_REDEMPTION_ENABLED=true
+ *
+ * Non-negotiable release controls:
+ * 1. Default to false if missing, undefined, malformed, or unrecognized (e.g. '0', 'false', 'disabled', 'yes', 'TRUE').
+ * 2. Only exact 'true' string enables the feature.
+ * 3. Backward-compatible with REWARDS_ELIGIBLE_DRINKS_ENABLED if present.
  */
-export let IS_FREE_DRINK_ELIGIBILITY_APPROVED = process.env.REWARDS_ELIGIBLE_DRINKS_ENABLED === 'true';
+export function isFreeDrinkRedemptionEnabled(): boolean {
+  const envVal = (
+    process.env.REWARDS_FREE_DRINK_REDEMPTION_ENABLED ??
+    process.env.REWARDS_ELIGIBLE_DRINKS_ENABLED ??
+    ''
+  ).trim();
+  return envVal === 'true';
+}
+
+export let IS_FREE_DRINK_REDEMPTION_ENABLED = isFreeDrinkRedemptionEnabled();
+
+export function setFreeDrinkRedemptionEnabled(enabled: boolean) {
+  IS_FREE_DRINK_REDEMPTION_ENABLED = enabled;
+  IS_FREE_DRINK_ELIGIBILITY_APPROVED = enabled;
+}
+
+// Backward-compatibility aliases for existing callers and test fixtures
+export let IS_FREE_DRINK_ELIGIBILITY_APPROVED = IS_FREE_DRINK_REDEMPTION_ENABLED;
 
 export function setFreeDrinkEligibilityApproved(approved: boolean) {
-  IS_FREE_DRINK_ELIGIBILITY_APPROVED = approved;
+  setFreeDrinkRedemptionEnabled(approved);
 }
 
 /**
@@ -242,8 +263,13 @@ export class OrderService {
         throw new ApiError(400, 'Reward claim is already linked to another order');
       }
 
-      if (!IS_FREE_DRINK_ELIGIBILITY_APPROVED && (claim.rewardId === MILESTONE_100_REWARD_ID || claim.rewardId === FIRST_ORDER_REWARD_ID)) {
-        throw new ApiError(400, 'Free drink reward eligibility list is currently pending business approval. Free drink rewards are disabled until approved.');
+      if (!IS_FREE_DRINK_REDEMPTION_ENABLED && (claim.rewardId === MILESTONE_100_REWARD_ID || claim.rewardId === FIRST_ORDER_REWARD_ID)) {
+        throw new ApiError(
+          400,
+          'Free drink reward redemption is currently disabled pending business activation. Earned rewards remain safe in your account.',
+          true,
+          'REWARD_REDEMPTION_DISABLED'
+        );
       }
 
       const milestoneConfig = MILESTONE_CONFIG[claim.rewardId];
