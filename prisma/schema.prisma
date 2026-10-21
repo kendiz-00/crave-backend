@@ -277,6 +277,7 @@ model Order {
   rewardPointsUsed    Int           @default(0)
   rewardCodeUsed      String?
   rewardCodeGenerated String?
+  promoCodeUsed       String?
   notes               String?
   customerName        String
   customerPhone       String
@@ -499,4 +500,44 @@ model OtpRateLimit {
 
   @@unique([phoneNumber, windowStart])
   @@index([phoneNumber])
+}
+
+// Enum for promo code discount type
+enum PromoCodeDiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+// Enum for promo code status
+enum PromoCodeStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+// PromoCode model for privately distributed promo codes
+model PromoCode {
+  id                String               @id @default(uuid())
+  code              String               @unique
+  name              String
+  description       String?
+  discountType      PromoCodeDiscountType
+  discountValue     Decimal              @db.Decimal(10, 2)
+  minSpend          Decimal?             @db.Decimal(10, 2)
+  maxDiscountAmount Decimal?             @db.Decimal(10, 2)
+  usageLimit        Int                  @default(1)
+  usageCount        Int                  @default(0)
+  expiresAt         DateTime
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  validFrom         DateTime             @default(now())
+  status            PromoCodeStatus      @default(ACTIVE)
+  createdBy         String?
+  restrictedUserIds String[]             @default([])
+  restrictedEmails  String[]             @default([])
+
+  @@index([code])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([validFrom])
 }

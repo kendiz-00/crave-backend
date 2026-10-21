@@ -2,6 +2,7 @@ import { OrderStatus, PaymentStatus, RewardTransactionType, Prisma } from '@pris
 import { ApiError } from '../types/errors';
 import { CreateOrderInput, UpdateOrderStatusInput, UpdatePaymentStatusInput } from '../validators';
 import { cartService } from './cart.service';
+import { promoCodeService } from './promo-code.service';
 import prisma from '@/database';
 
 type PricedRecord = { id: string; price: number | string | { toString(): string } };
@@ -199,6 +200,25 @@ export class OrderService {
       rewardCodeUsed = rewardCode.code;
     }
 
+    // Validate promo code if provided
+    let promoDiscount = 0;
+    let promoCodeUsed = null;
+    if (data.promoCodeUsed) {
+      // Calculate subtotal for validation
+      const cartTotal = await this.calculateCartTotalFromItems(cart.items);
+      const subtotal = cartTotal.subtotal;
+
+      const promoResult = await promoCodeService.validatePromoCode({
+        code: data.promoCodeUsed,
+        userId,
+        userEmail: data.customerEmail,
+        subtotal,
+      });
+
+      promoDiscount = promoResult.discountAmount;
+      promoCodeUsed = promoResult.code;
+    }
+
     // Validate and process reward points redemption if provided
     let pointsDiscount = 0;
     let pointsRedeemed = 0;
@@ -336,7 +356,7 @@ export class OrderService {
     const cartTotal = await this.calculateCartTotalFromItems(cart.items);
     const subtotal = cartTotal.subtotal;
     const deliveryFee = 0; // Delivery fee removed (GH¢ 0.00)
-    const totalDiscount = discount + pointsDiscount + rewardDiscount;
+    const totalDiscount = discount + pointsDiscount + rewardDiscount + promoDiscount;
     const { tax, grandTotal } = calculateOrderAmounts(subtotal, totalDiscount, deliveryFee);
 
     // Generate order number
@@ -369,12 +389,13 @@ export class OrderService {
           paymentStatus: PaymentStatus.PENDING,
           orderType: data.orderType,
           subtotal,
-          discount: discount + rewardDiscount,
+          discount: discount + rewardDiscount + promoDiscount,
           tax,
           deliveryFee,
           grandTotal,
           rewardCodeUsed,
           rewardPointsUsed: pointsRedeemed,
+          promoCodeUsed,
           customerName: data.customerName,
           customerPhone: data.customerPhone,
           customerEmail: data.customerEmail,
@@ -415,10 +436,22 @@ export class OrderService {
       if (rewardCodeUsed) {
         await tx.rewardCode.update({
           where: { code: rewardCodeUsed },
-          data: { 
+          data: {
             status: 'REDEEMED',
             orderId: newOrder.id,
             redeemedAt: new Date(),
+          },
+        });
+      }
+
+      // Increment promo code usage count if applicable
+      if (promoCodeUsed) {
+        await tx.promoCode.update({
+          where: { code: promoCodeUsed },
+          data: {
+            usageCount: {
+              increment: 1,
+            },
           },
         });
       }
