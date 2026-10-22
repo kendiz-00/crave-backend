@@ -282,6 +282,21 @@ export class PromoCodeService {
       },
     });
   }
+
+  /**
+   * Restore usage count when an order is cancelled
+   * This allows the promo code to be used again
+   */
+  async restoreUsageCount(code: string) {
+    await prisma.promoCode.update({
+      where: { code: code.toUpperCase() },
+      data: {
+        usageCount: {
+          decrement: 1,
+        },
+      },
+    });
+  }
 }
 
 export const promoCodeService = new PromoCodeService();

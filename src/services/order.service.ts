@@ -152,6 +152,21 @@ export class OrderService {
    * Create order from cart
    */
   async createOrder(userId: string, data: CreateOrderInput) {
+    // Check for idempotency key to prevent duplicate orders
+    if (data.idempotencyKey) {
+      const existingOrder = await prisma.order.findUnique({
+        where: { idempotencyKey: data.idempotencyKey },
+      });
+
+      if (existingOrder) {
+        // Return existing order instead of creating duplicate
+        return {
+          order: existingOrder,
+          isDuplicate: true,
+        };
+      }
+    }
+
     // Get active cart
     const cart = await cartService.getActiveCart(userId);
 
@@ -405,6 +420,7 @@ export class OrderService {
           rewardCodeUsed,
           rewardPointsUsed: pointsRedeemed,
           promoCodeUsed,
+          idempotencyKey: data.idempotencyKey,
           customerName: data.customerName,
           customerPhone: data.customerPhone,
           customerEmail: data.customerEmail,
@@ -454,12 +470,35 @@ export class OrderService {
       }
 
       // Increment promo code usage count if applicable
-      // NOTE: Usage is consumed atomically within the order transaction.
+      // NOTE: Usage is consumed atomically within the order transaction with conditional check.
+      // This prevents concurrent requests from exceeding the usage limit.
       // For WhatsApp checkout, this occurs when the order is created and WhatsApp message is generated.
-      // This prevents duplicate usage and ensures the code is consumed only once per order.
+      // If the order is later cancelled, the usage can be restored.
       if (promoCodeUsed) {
-        await tx.promoCode.update({
+        const promoCode = await tx.promoCode.findUnique({
           where: { code: promoCodeUsed },
+        });
+
+        if (!promoCode) {
+          throw new ApiError(400, 'Promo code not found');
+        }
+
+        if (promoCode.usageCount >= promoCode.usageLimit) {
+          throw new ApiError(400, 'Promo code has reached its usage limit');
+        }
+
+        if (promoCode.status !== PromoCodeStatus.ACTIVE) {
+          throw new ApiError(400, 'Promo code is not active');
+        }
+
+        // Atomically increment usage count
+        await tx.promoCode.update({
+          where: {
+            code: promoCodeUsed,
+            usageCount: {
+              lt: promoCode.usageLimit, // Conditional: only increment if under limit
+            },
+          },
           data: {
             usageCount: {
               increment: 1,
@@ -903,6 +942,11 @@ export class OrderService {
       if (order.status !== OrderStatus.PENDING) {
         throw new ApiError(400, 'Can only cancel pending orders');
       }
+    }
+
+    // Restore promo code usage if applicable
+    if (order.promoCodeUsed) {
+      await promoCodeService.restoreUsageCount(order.promoCodeUsed);
     }
 
     return this.updateOrderStatus(orderId, { status: OrderStatus.CANCELLED }, userRole);

@@ -278,6 +278,7 @@ model Order {
   rewardCodeUsed      String?
   rewardCodeGenerated String?
   promoCodeUsed       String?
+  idempotencyKey       String?      @unique
   notes               String?
   customerName        String
   customerPhone       String

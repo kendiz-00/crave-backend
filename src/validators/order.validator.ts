@@ -29,6 +29,7 @@ export const createOrderSchema = z.object({
   rewardPointsUsed: z.number().int().nonnegative().optional(),
   claimedRewardId: z.string().optional().nullable(),
   promoCodeUsed: z.string().optional(),
+  idempotencyKey: z.string().uuid().optional(),
 });
 
 // Update order status validator
