@@ -32,17 +32,21 @@ class TestSmsStore {
 
 export class TestSmsProvider implements SmsProvider {
   async sendOtp(phoneNumber: string, otp: string): Promise<void> {
+    // Redact OTP in console logs for security (use helper method to retrieve during tests)
+    const redactedOtp = otp.substring(0, 2) + '****';
+
     console.log('═══════════════════════════════════════════════════════════════');
-    console.log('📱 TEST SMS PROVIDER - OTP CODE');
+    console.log('📱 TEST SMS PROVIDER - DEVELOPMENT ONLY');
     console.log('═══════════════════════════════════════════════════════════════');
     console.log(`Phone Number: ${phoneNumber}`);
-    console.log(`OTP Code: ${otp}`);
+    console.log(`OTP Code: ${redactedOtp} (use TestSmsProvider.getTestOtp() to retrieve)`);
     console.log('═══════════════════════════════════════════════════════════════');
-    console.log('⚠️  This is a test provider. No SMS was actually sent.');
-    console.log('⚠️  Configure a real SMS provider for production use.');
+    console.log('⚠️  THIS PROVIDER IS FOR DEVELOPMENT/TESTING ONLY');
+    console.log('⚠️  DO NOT USE IN PRODUCTION UNDER ANY CIRCUMSTANCES');
+    console.log('⚠️  Configure SMS_PROVIDER=bulkclix for production use');
     console.log('═══════════════════════════════════════════════════════════════');
-    
-    // Store OTP for test retrieval
+
+    // Store OTP for test retrieval (in-memory only, never logged)
     TestSmsStore.getInstance().setOtp(phoneNumber, otp);
   }
 

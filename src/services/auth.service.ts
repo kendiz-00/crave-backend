@@ -10,7 +10,7 @@ const SALT_ROUNDS = 10;
 export class AuthService {
   // Register a new user with phone verification
   static async register(data: RegisterInput) {
-    const { email, phone, password, firstName, lastName, role } = data;
+    const { email, phone, password, firstName, lastName } = data;
 
     // Normalize phone number
     const normalizedPhone = OtpService.normalizePhoneNumber(phone);
@@ -44,15 +44,13 @@ export class AuthService {
       throw new ApiError(HttpStatus.CONFLICT, 'Phone number already registered');
     }
 
-    // Check if email already exists (if provided)
-    if (email) {
-      const existingEmail = await prisma.user.findUnique({
-        where: { email },
-      });
+    // Check if email already exists
+    const existingEmail = await prisma.user.findUnique({
+      where: { email },
+    });
 
-      if (existingEmail) {
-        throw new ApiError(HttpStatus.CONFLICT, 'Email already registered');
-      }
+    if (existingEmail) {
+      throw new ApiError(HttpStatus.CONFLICT, 'Email already registered');
     }
 
     // Hash password
@@ -69,7 +67,7 @@ export class AuthService {
           password: hashedPassword,
           firstName,
           lastName,
-          role: role || 'CUSTOMER',
+          role: 'CUSTOMER',
         },
         select: {
           id: true,

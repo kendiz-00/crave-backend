@@ -89,12 +89,14 @@ export class AfricasTalkingProvider implements SmsProvider {
       }
       
       if (data.SMSMessageData?.Recipients?.[0]?.status !== 'Success') {
-        throw new Error(`SMS delivery failed: ${JSON.stringify(data)}`);
+        throw new Error(`SMS delivery failed`);
       }
 
-      console.log(`OTP sent successfully to ${phoneNumber} via Africa's Talking`);
+      // Log success without exposing phone number or OTP
+      console.log(`SMS sent successfully via Africa's Talking`);
     } catch (error) {
-      console.error('Error sending OTP via Africa\'s Talking:', error);
+      // Log error without exposing sensitive information
+      console.error('Error sending SMS via Africa\'s Talking:', error instanceof Error ? error.message : 'Unknown error');
       throw error;
     }
   }
