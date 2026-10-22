@@ -25,9 +25,15 @@ export const UpdatePromoCodeSchema = CreatePromoCodeSchema.partial().extend({
 
 export const ValidatePromoCodeSchema = z.object({
   code: z.string().min(3).max(50).toUpperCase(),
-  userId: z.string().uuid().optional(),
-  userEmail: z.string().email().optional(),
-  subtotal: z.number().min(0),
+  cartItems: z.array(z.object({
+    menuItemId: z.string().uuid(),
+    quantity: z.number().int().positive(),
+    addOns: z.array(z.object({
+      addOnId: z.string().uuid(),
+      name: z.string(),
+      price: z.number(),
+    })).optional(),
+  })).optional(),
 });
 
 export type CreatePromoCodeInput = z.infer<typeof CreatePromoCodeSchema>;

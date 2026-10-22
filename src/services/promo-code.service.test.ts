@@ -112,22 +112,64 @@ describe('PromoCodeService', () => {
   });
 
   describe('validatePromoCode', () => {
-    it('should validate a valid promo code', async () => {
+    // Create a test menu item for cart validation
+    let testMenuItemId: string;
+
+    beforeAll(async () => {
+      const testCategory = await prisma.category.create({
+        data: {
+          name: 'Test Category',
+          slug: 'test-category',
+        },
+      });
+
+      const testMenuItem = await prisma.menuItem.create({
+        data: {
+          name: 'Test Item',
+          slug: 'test-item',
+          description: 'Test item',
+          price: 50,
+          imageUrl: 'test.jpg',
+          preparationTime: 15,
+          categoryId: testCategory.id,
+        },
+      });
+
+      testMenuItemId = testMenuItem.id;
+    });
+
+    afterAll(async () => {
+      // Cleanup test menu item
+      await prisma.menuItem.delete({
+        where: { id: testMenuItemId },
+      });
+      await prisma.category.deleteMany({
+        where: { slug: 'test-category' },
+      });
+    });
+
+    it('should validate a valid promo code with cart items', async () => {
       const result = await promoCodeService.validatePromoCode({
         code: 'TEST10',
-        subtotal: 100,
+        cartItems: [
+          {
+            menuItemId: testMenuItemId,
+            quantity: 2,
+            addOns: [],
+          },
+        ],
       });
 
       expect(result.valid).toBe(true);
       expect(result.code).toBe('TEST10');
-      expect(result.discountAmount).toBe(10); // 10% of 100
+      expect(result.discountAmount).toBe(10); // 10% of 100 (50 * 2)
     });
 
     it('should throw error for invalid promo code', async () => {
       await expect(
         promoCodeService.validatePromoCode({
           code: 'INVALID',
-          subtotal: 100,
+          cartItems: [],
         })
       ).rejects.toThrow('Invalid promo code');
     });
@@ -142,7 +184,7 @@ describe('PromoCodeService', () => {
       await expect(
         promoCodeService.validatePromoCode({
           code: 'TEST10',
-          subtotal: 100,
+          cartItems: [],
         })
       ).rejects.toThrow('Promo code is not active');
 
@@ -157,7 +199,7 @@ describe('PromoCodeService', () => {
       await expect(
         promoCodeService.validatePromoCode({
           code: 'TEST10',
-          subtotal: 100,
+          cartItems: [],
         })
       ).rejects.toThrow('Promo code has expired');
     });
@@ -176,15 +218,35 @@ describe('PromoCodeService', () => {
       await expect(
         promoCodeService.validatePromoCode({
           code: 'TEST10',
-          subtotal: 30,
+          cartItems: [
+            {
+              menuItemId: testMenuItemId,
+              quantity: 1,
+              addOns: [],
+            },
+          ],
         })
       ).rejects.toThrow('Minimum spend of GH₵50 required');
     });
 
     it('should apply max discount cap', async () => {
+      await prisma.promoCode.update({
+        where: { id: testPromoCodeId },
+        data: {
+          minSpend: null,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        },
+      });
+
       const result = await promoCodeService.validatePromoCode({
         code: 'TEST10',
-        subtotal: 500,
+        cartItems: [
+          {
+            menuItemId: testMenuItemId,
+            quantity: 10,
+            addOns: [],
+          },
+        ],
       });
 
       expect(result.valid).toBe(true);
@@ -202,11 +264,13 @@ describe('PromoCodeService', () => {
       });
 
       await expect(
-        promoCodeService.validatePromoCode({
-          code: 'TEST10',
-          userId: '00000000-0000-0000-0000-000000000002',
-          subtotal: 100,
-        })
+        promoCodeService.validatePromoCode(
+          {
+            code: 'TEST10',
+            cartItems: [],
+          },
+          '00000000-0000-0000-0000-000000000002'
+        )
       ).rejects.toThrow('This promo code is not available for your account');
 
       // Clear restrictions
@@ -227,11 +291,14 @@ describe('PromoCodeService', () => {
       });
 
       await expect(
-        promoCodeService.validatePromoCode({
-          code: 'TEST10',
-          userEmail: 'blocked@example.com',
-          subtotal: 100,
-        })
+        promoCodeService.validatePromoCode(
+          {
+            code: 'TEST10',
+            cartItems: [],
+          },
+          undefined,
+          'blocked@example.com'
+        )
       ).rejects.toThrow('This promo code is not available for your email');
 
       // Clear restrictions
@@ -241,22 +308,6 @@ describe('PromoCodeService', () => {
           restrictedEmails: [],
         },
       });
-    });
-  });
-
-  describe('incrementUsageCount', () => {
-    it('should increment usage count', async () => {
-      const before = await prisma.promoCode.findUnique({
-        where: { id: testPromoCodeId },
-      });
-
-      await promoCodeService.incrementUsageCount('TEST10');
-
-      const after = await prisma.promoCode.findUnique({
-        where: { id: testPromoCodeId },
-      });
-
-      expect(after.usageCount).toBe(before.usageCount + 1);
     });
   });
 

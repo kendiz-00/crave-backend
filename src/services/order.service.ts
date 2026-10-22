@@ -204,16 +204,25 @@ export class OrderService {
     let promoDiscount = 0;
     let promoCodeUsed = null;
     if (data.promoCodeUsed) {
-      // Calculate subtotal for validation
-      const cartTotal = await this.calculateCartTotalFromItems(cart.items);
-      const subtotal = cartTotal.subtotal;
+      // Prepare cart items for server-side validation
+      const cartItemsForValidation = cart.items.map(item => ({
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        addOns: item.addOns?.map(addOn => ({
+          addOnId: addOn.addOnId,
+          name: addOn.name,
+          price: Number(addOn.price),
+        })) || [],
+      }));
 
-      const promoResult = await promoCodeService.validatePromoCode({
-        code: data.promoCodeUsed,
+      const promoResult = await promoCodeService.validatePromoCode(
+        {
+          code: data.promoCodeUsed,
+          cartItems: cartItemsForValidation,
+        },
         userId,
-        userEmail: data.customerEmail,
-        subtotal,
-      });
+        data.customerEmail
+      );
 
       promoDiscount = promoResult.discountAmount;
       promoCodeUsed = promoResult.code;
@@ -445,6 +454,9 @@ export class OrderService {
       }
 
       // Increment promo code usage count if applicable
+      // NOTE: Usage is consumed atomically within the order transaction.
+      // For WhatsApp checkout, this occurs when the order is created and WhatsApp message is generated.
+      // This prevents duplicate usage and ensures the code is consumed only once per order.
       if (promoCodeUsed) {
         await tx.promoCode.update({
           where: { code: promoCodeUsed },

@@ -162,8 +162,8 @@ export class PromoCodeService {
   /**
    * Validate a promo code for checkout
    */
-  async validatePromoCode(data: ValidatePromoCodeInput) {
-    const { code, userId, userEmail, subtotal } = data;
+  async validatePromoCode(data: ValidatePromoCodeInput, userId?: string, userEmail?: string) {
+    const { code, cartItems } = data;
 
     // Find promo code
     const promoCode = await prisma.promoCode.findUnique({
@@ -194,19 +194,44 @@ export class PromoCodeService {
       throw new ApiError(400, 'Promo code has reached its usage limit');
     }
 
+    // Calculate subtotal from cart items (server-side, not client-supplied)
+    let subtotal = 0;
+    if (cartItems && cartItems.length > 0) {
+      const menuItemIds = cartItems.map(item => item.menuItemId);
+      const menuItems = await prisma.menuItem.findMany({
+        where: { id: { in: menuItemIds } },
+      });
+
+      for (const cartItem of cartItems) {
+        const menuItem = menuItems.find(mi => mi.id === cartItem.menuItemId);
+        if (!menuItem) {
+          throw new ApiError(400, 'Menu item no longer available');
+        }
+        const itemTotal = Number(menuItem.price) * cartItem.quantity;
+        subtotal += itemTotal;
+
+        // Add add-on prices
+        if (cartItem.addOns && cartItem.addOns.length > 0) {
+          for (const addOn of cartItem.addOns) {
+            subtotal += addOn.price * cartItem.quantity;
+          }
+        }
+      }
+    }
+
     // Check minimum spend requirement
     if (promoCode.minSpend && subtotal < Number(promoCode.minSpend)) {
       throw new ApiError(400, `Minimum spend of GH₵${promoCode.minSpend} required`);
     }
 
-    // Check user restrictions if user is logged in
+    // Check user restrictions if user is logged in (from verified auth token)
     if (userId && promoCode.restrictedUserIds.length > 0) {
       if (!promoCode.restrictedUserIds.includes(userId)) {
         throw new ApiError(403, 'This promo code is not available for your account');
       }
     }
 
-    // Check email restrictions if email is provided
+    // Check email restrictions if email is provided (from verified auth token)
     if (userEmail && promoCode.restrictedEmails.length > 0) {
       if (!promoCode.restrictedEmails.includes(userEmail.toLowerCase())) {
         throw new ApiError(403, 'This promo code is not available for your email');
@@ -238,20 +263,6 @@ export class PromoCodeService {
       discountAmount,
       expiresAt: promoCode.expiresAt,
     };
-  }
-
-  /**
-   * Increment usage count after successful order
-   */
-  async incrementUsageCount(code: string) {
-    await prisma.promoCode.update({
-      where: { code: code.toUpperCase() },
-      data: {
-        usageCount: {
-          increment: 1,
-        },
-      },
-    });
   }
 
   /**

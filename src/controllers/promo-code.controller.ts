@@ -107,11 +107,7 @@ export class PromoCodeController {
       const userId = req.user?.id;
       const userEmail = req.user?.email;
 
-      const result = await promoCodeService.validatePromoCode({
-        ...data,
-        userId,
-        userEmail,
-      });
+      const result = await promoCodeService.validatePromoCode(data, userId, userEmail);
 
       res.json(result);
     } catch (error) {
