@@ -11,7 +11,7 @@ import rewardRoute from '@/routes/reward.route';
 import paymentRoute from '@/routes/payment.route';
 import seedRoutes from "./seed.route";
 import debugRoute from '@/routes/debug.route';
-import simplePromoRoute from '@/routes/simple-promo.route';
+import simplePromoRoute from '@/routes/simple-promo.routes';
 
 const router = Router();
 

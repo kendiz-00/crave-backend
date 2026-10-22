@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ApiError } from '../types/errors';
 
 // Simple hardcoded promo codes for quick deployment
-const PROMO_CODES = {
+const PROMO_CODES: Record<string, { code: string; discountType: string; discountValue: number; active: boolean }> = {
   CORPERATE: {
     code: 'CORPERATE',
     discountType: 'PERCENTAGE',
@@ -51,4 +51,3 @@ export class SimplePromoController {
 }
 
 export const simplePromoController = new SimplePromoController();
-// Force Render redeploy
