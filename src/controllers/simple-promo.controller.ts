@@ -51,3 +51,4 @@ export class SimplePromoController {
 }
 
 export const simplePromoController = new SimplePromoController();
+// Force Render redeploy
