@@ -1,13 +1,27 @@
-import { PaymentMethod, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
+import { PaymentMethod, PaymentGateway, PaymentStatus } from '@prisma/client';
 import { ApiError } from '../types/errors';
+import { orderService } from './order.service';
 import prisma from '@/database';
+
+export function assertPaymentAmountMatchesOrder(submittedAmount: number, authoritativeAmount: number): void {
+  if (!Number.isFinite(submittedAmount) || submittedAmount <= 0) {
+    throw new ApiError(400, 'Payment amount must be a positive number');
+  }
+  if (!Number.isFinite(authoritativeAmount) || authoritativeAmount <= 0) {
+    throw new ApiError(400, 'Order total is not available for payment initialization');
+  }
+  if (Math.abs(submittedAmount - authoritativeAmount) > 0.01) {
+    throw new ApiError(400, 'Payment amount does not match the verified order total');
+  }
+}
 
 export class PaymentService {
   /**
    * Initialize payment with Paystack
    */
   async initializePayment(orderId: string, email: string, amount: number, method: PaymentMethod = PaymentMethod.CARD) {
-    // Validate order exists
+    // Fetch the stored order and use its authoritative total instead of trusting
+    // any client-submitted price or stale fallback value.
     const order = await prisma.order.findUnique({
       where: { id: orderId },
     });
@@ -15,6 +29,9 @@ export class PaymentService {
     if (!order) {
       throw new ApiError(404, 'Order not found');
     }
+
+    const authoritativeAmount = Number(order.grandTotal ?? 0);
+    assertPaymentAmountMatchesOrder(amount, authoritativeAmount);
 
     // Check if order already has a pending payment
     const existingPayment = await prisma.payment.findFirst({
@@ -36,7 +53,7 @@ export class PaymentService {
       data: {
         orderId,
         reference,
-        amount: amount,
+        amount: authoritativeAmount,
         currency: 'GHS',
         method,
         gateway: PaymentGateway.PAYSTACK,
@@ -44,6 +61,8 @@ export class PaymentService {
         metadata: {
           email,
           orderId,
+          submittedAmount: amount,
+          serverVerifiedAmount: authoritativeAmount,
         },
       },
     });
@@ -82,7 +101,7 @@ export class PaymentService {
       // If already verified, return existing payment and complete any deferred claim
       // transition from an earlier deployment or retry.
       if (payment.status === PaymentStatus.PAID) {
-        await this.redeemOrderClaims(tx, payment.orderId);
+        await orderService.processOrderPaymentSuccess(tx, payment.orderId);
         return payment;
       }
 
@@ -110,7 +129,7 @@ export class PaymentService {
           status: 'CONFIRMED',
         },
       });
-      await this.redeemOrderClaims(tx, payment.orderId);
+      await orderService.processOrderPaymentSuccess(tx, payment.orderId);
 
       return updatedPayment;
     });
@@ -159,6 +178,7 @@ export class PaymentService {
       }
 
       if (payment.status === PaymentStatus.PAID) {
+        await orderService.processOrderPaymentSuccess(tx, payment.orderId);
         return; // Already processed (idempotent)
       }
 
@@ -178,13 +198,13 @@ export class PaymentService {
           status: 'CONFIRMED',
         },
       });
-      await this.redeemOrderClaims(tx, payment.orderId);
+      await orderService.processOrderPaymentSuccess(tx, payment.orderId);
     });
   }
 
   /**
    * Handle failed charge
-   * Uses transaction for atomic payment status update
+   * Uses transaction for atomic payment status update, reservation release, and point restoration
    */
   private async handleFailedCharge(data: { reference: string }) {
     const { reference } = data;
@@ -192,6 +212,7 @@ export class PaymentService {
     return prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({
         where: { reference },
+        include: { order: true },
       });
 
       if (!payment) {
@@ -206,6 +227,49 @@ export class PaymentService {
           gatewayResponse: data,
         },
       });
+
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: {
+          paymentStatus: PaymentStatus.FAILED,
+        },
+      });
+
+      // Release any RESERVED claim back to AVAILABLE
+      await tx.rewardClaim.updateMany({
+        where: {
+          orderId: payment.orderId,
+          status: 'RESERVED',
+        },
+        data: {
+          status: 'AVAILABLE',
+          reservedAt: null,
+          orderId: null,
+        },
+      });
+
+      // Restore spendable points if any were deducted at checkout
+      const order = payment.order;
+      if (order && order.rewardPointsUsed && order.rewardPointsUsed > 0) {
+        const restoreRef = `restore_fail_${order.id}`;
+        const existingRestore = await tx.rewardTransaction.findFirst({
+          where: {
+            userId: order.userId,
+            referenceId: restoreRef,
+          },
+        });
+        if (!existingRestore) {
+          await orderService.createRewardTransaction(
+            tx,
+            order.userId,
+            order.id,
+            'ADJUSTMENT',
+            order.rewardPointsUsed,
+            `Restored spendable points from failed payment on order ${order.orderNumber}`,
+            restoreRef,
+          );
+        }
+      }
     });
   }
 
@@ -225,32 +289,6 @@ export class PaymentService {
     console.log('Transfer failed:', data);
   }
 
-  /**
-   * Redeem all claimed rewards linked to a paid order. The update is atomic with
-   * the payment transition so failed payments cannot consume a reward.
-   */
-  private async redeemOrderClaims(tx: Prisma.TransactionClient, orderId: string) {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      select: { userId: true },
-    });
-
-    if (!order) {
-      throw new ApiError(404, 'Order not found');
-    }
-
-    await tx.rewardClaim.updateMany({
-      where: {
-        orderId,
-        userId: order.userId,
-        status: 'CLAIMED',
-      },
-      data: {
-        status: 'REDEEMED',
-        redeemedAt: new Date(),
-      },
-    });
-  }
 
   /**
    * Verify payment with Paystack API
@@ -333,11 +371,14 @@ export class PaymentService {
   /**
    * Refund payment
    * Uses transaction to ensure atomic updates to payment and order status
+   * Refund payment (supports full and partial refunds with proportional points reversal)
+   * Uses transaction to ensure atomic updates to payment, order, and reward ledger
    */
-  async refundPayment(paymentId: string, reason?: string) {
+  async refundPayment(paymentId: string, reason?: string, refundAmount?: number) {
     return prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
+        include: { order: true },
       });
 
       if (!payment) {
@@ -348,30 +389,141 @@ export class PaymentService {
         throw new ApiError(400, 'Payment cannot be refunded');
       }
 
+      const totalPaymentAmount = Number(payment.amount);
+      const effectiveRefundAmount = refundAmount !== undefined ? Math.min(refundAmount, totalPaymentAmount) : totalPaymentAmount;
+
+      if (effectiveRefundAmount <= 0) {
+        throw new ApiError(400, 'Refund amount must be greater than zero');
+      }
+
       // Initiate refund with Paystack
-      const refund = await this.initiateRefund(payment.reference, Number(payment.amount), reason);
+      const refund = await this.initiateRefund(payment.reference, effectiveRefundAmount, reason);
+
+      const isFullRefund = effectiveRefundAmount >= totalPaymentAmount - 0.01;
 
       // Update payment status
       await tx.payment.update({
         where: { id: paymentId },
         data: {
-          status: PaymentStatus.REFUNDED,
+          status: isFullRefund ? PaymentStatus.REFUNDED : PaymentStatus.PAID,
           gatewayResponse: JSON.parse(JSON.stringify(refund)),
           metadata: {
             ...(payment.metadata as Record<string, unknown>),
             refundReason: reason,
+            refundAmount: effectiveRefundAmount,
+            isFullRefund,
           },
         },
       });
 
-      // Update order status
-      await tx.order.update({
-        where: { id: payment.orderId },
-        data: {
-          paymentStatus: PaymentStatus.REFUNDED,
-          status: 'REFUNDED',
-        },
-      });
+      // Update order status if fully refunded
+      if (isFullRefund) {
+        await tx.order.update({
+          where: { id: payment.orderId },
+          data: {
+            paymentStatus: PaymentStatus.REFUNDED,
+            status: 'REFUNDED',
+          },
+        });
+      }
+
+      // Proportional points reversal
+      const order = payment.order;
+      if (order && order.userId) {
+        const grandTotal = Number(order.grandTotal);
+        const pointsEarned = order.rewardPointsEarned ?? 0;
+
+        // Cumulative reversals already done for this order
+        const existingReversals = await tx.rewardTransaction.aggregate({
+          where: {
+            orderId: order.id,
+            type: 'ADJUSTMENT',
+            points: { lt: 0 },
+          },
+          _sum: { points: true },
+        });
+        const alreadyReversed = Math.abs(existingReversals._sum.points || 0);
+        const maxReversible = Math.max(0, pointsEarned - alreadyReversed);
+
+        let pointsToReverse = 0;
+        if (grandTotal > 0 && pointsEarned > 0 && maxReversible > 0) {
+          // Proportional calculation: (refundAmount / grandTotal) * pointsEarned
+          const calculatedReversal = Math.floor((effectiveRefundAmount / grandTotal) * pointsEarned);
+          pointsToReverse = Math.min(maxReversible, calculatedReversal);
+        }
+
+        if (pointsToReverse > 0) {
+          // Lock user row
+          await tx.$queryRaw`
+            SELECT id FROM "User" WHERE id = ${order.userId} FOR UPDATE
+          `;
+
+          const lastTx = await tx.rewardTransaction.findFirst({
+            where: { userId: order.userId },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          const currentRunning = lastTx?.runningBalance || 0;
+          const newRunning = Math.max(0, currentRunning - pointsToReverse);
+
+          await tx.rewardTransaction.create({
+            data: {
+              userId: order.userId,
+              orderId: order.id,
+              referenceId: `refund_adj_${payment.id}_${Date.now()}`,
+              type: 'ADJUSTMENT',
+              points: -pointsToReverse,
+              runningBalance: newRunning,
+              reason: `Points reversal for refund on order ${order.orderNumber}: -${pointsToReverse} points`,
+            },
+          });
+
+          // Decrement lifetime points
+          const user = await tx.user.findUnique({
+            where: { id: order.userId },
+            select: { lifetimePointsEarned: true },
+          });
+          if (user) {
+            await tx.user.update({
+              where: { id: order.userId },
+              data: {
+                lifetimePointsEarned: Math.max(0, user.lifetimePointsEarned - pointsToReverse),
+              },
+            });
+          }
+        }
+
+        // Restore spendable points used on this order (for full refunds or first refund)
+        if (order.rewardPointsUsed && order.rewardPointsUsed > 0) {
+          const restoreRef = `refund_restore_points_${order.id}`;
+          const existingRestore = await tx.rewardTransaction.findFirst({
+            where: {
+              userId: order.userId,
+              referenceId: restoreRef,
+            },
+          });
+
+          if (!existingRestore) {
+            const lastTxAfterReversal = await tx.rewardTransaction.findFirst({
+              where: { userId: order.userId },
+              orderBy: { createdAt: 'desc' },
+            });
+            const curBal = lastTxAfterReversal?.runningBalance || 0;
+
+            await tx.rewardTransaction.create({
+              data: {
+                userId: order.userId,
+                orderId: order.id,
+                referenceId: restoreRef,
+                type: 'ADJUSTMENT',
+                points: order.rewardPointsUsed,
+                runningBalance: curBal + order.rewardPointsUsed,
+                reason: `Restored spendable points from refunded order ${order.orderNumber}`,
+              },
+            });
+          }
+        }
+      }
 
       return refund;
     });

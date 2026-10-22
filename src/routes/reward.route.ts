@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { orderController } from '../controllers';
 import { authenticate } from '../middleware/auth.middleware';
+import { authorize } from '../middleware/authorization.middleware';
 
 const router = Router();
 
@@ -29,11 +30,27 @@ router.get('/balance', orderController.getRewardBalance);
 router.get('/history', orderController.getRewardHistory);
 
 /**
- * @route   POST /api/rewards/transactions
- * @desc    Create a reward transaction for the authenticated user
+ * @route   GET /api/rewards/eligible-drinks
+ * @desc    Return the backend-controlled list of drink names eligible for the 100-point milestone reward.
+ *          Frontend must use this list and must not maintain its own conflicting copy.
  * @access  Private
  */
-router.post('/transactions', orderController.createRewardTransaction);
+router.get('/eligible-drinks', orderController.getEligibleDrinks);
+
+/**
+ * @route   GET /api/rewards/redemption-status
+ * @desc    Get the administrative verification status of the free-drink redemption feature flag
+ *          without exposing secret keys or environment variables.
+ * @access  Private
+ */
+router.get('/redemption-status', orderController.getRedemptionStatus);
+
+/**
+ * @route   POST /api/rewards/transactions
+ * @desc    Create a reward transaction (Admin/Owner only - prevents arbitrary point minting)
+ * @access  Private (Admin/Owner)
+ */
+router.post('/transactions', authorize('ADMIN', 'OWNER'), orderController.createRewardTransaction);
 
 /**
  * @route   POST /api/rewards/claims

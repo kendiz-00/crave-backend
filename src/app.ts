@@ -50,8 +50,14 @@ export const createApp = (): Application => {
     level: 6, // Balance between compression ratio and CPU usage
   }));
 
-  // Body parsing
-  app.use(express.json());
+  // Body parsing with rawBody capture for exact cryptographic webhook verification
+  app.use(
+    express.json({
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true }));
 
   // Request logging with Pino

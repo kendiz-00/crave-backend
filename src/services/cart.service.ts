@@ -3,6 +3,31 @@ import { ApiError } from '../types/errors';
 import { CartItemInput, CreateCartInput, UpdateCartItemInput } from '../validators';
 import prisma from '@/database';
 
+type MenuAddOn = { id: string; name: string; price: number | string | { toString(): string } };
+type RequestedAddOn = { addOnId: string; name: string; price: number };
+
+export function resolveAuthoritativeAddOns(
+  availableAddOns: MenuAddOn[],
+  requestedAddOns: RequestedAddOn[] = [],
+): { addOnId: string; name: string; price: number }[] {
+  const seen = new Set<string>();
+  return requestedAddOns.map((requested) => {
+    const addOn = availableAddOns.find((available) => available.id === requested.addOnId);
+    if (!addOn) {
+      throw new ApiError(400, `Invalid add-on: ${requested.name}`);
+    }
+    if (seen.has(addOn.id)) {
+      throw new ApiError(400, 'Duplicate add-ons detected');
+    }
+    seen.add(addOn.id);
+    return {
+      addOnId: addOn.id,
+      name: addOn.name,
+      price: Number(addOn.price),
+    };
+  });
+}
+
 export class CartService {
   /**
    * Get or create active cart for user
@@ -58,10 +83,8 @@ export class CartService {
    * Optimized to use transaction and batch operations
    */
   async createCart(userId: string, data: CreateCartInput) {
-    return prisma.$transaction(async (tx) => {
-      // Get or create active cart
-      const cart = await this.getActiveCart(userId);
-
+    const cart = await this.getActiveCart(userId);
+    await prisma.$transaction(async (tx) => {
       // Clear existing items
       await tx.cartItem.deleteMany({
         where: { cartId: cart.id },
@@ -71,10 +94,8 @@ export class CartService {
       for (const item of data.items) {
         await this.addCartItemInternal(tx, cart.id, item);
       }
-
-      // Return updated cart
-      return this.getActiveCart(userId);
     });
+    return this.getActiveCart(userId);
   }
 
   /**
@@ -96,19 +117,8 @@ export class CartService {
     }
 
     // Validate add-ons and calculate prices from database
-    let addOnsPrice = 0;
-    if (item.addOns && item.addOns.length > 0) {
-      const validAddOnIds = menuItem.addOns.map((a: { id: string }) => a.id);
-      for (const addOn of item.addOns) {
-        if (!validAddOnIds.includes(addOn.addOnId)) {
-          throw new ApiError(400, `Invalid add-on: ${addOn.name}`);
-        }
-        const validAddOn = menuItem.addOns.find((a: { id: string }) => a.id === addOn.addOnId);
-        if (validAddOn) {
-          addOnsPrice += Number(validAddOn.price);
-        }
-      }
-    }
+    const addOns = resolveAuthoritativeAddOns(menuItem.addOns, item.addOns);
+    const addOnsPrice = addOns.reduce((sum, addOn) => sum + addOn.price, 0);
 
     const unitPrice = Number(menuItem.price);
     const totalPrice = (unitPrice + addOnsPrice) * item.quantity;
@@ -120,12 +130,12 @@ export class CartService {
         quantity: item.quantity,
         unitPrice,
         totalPrice,
-        addOns: item.addOns
+        addOns: addOns.length > 0
           ? {
-              create: item.addOns.map((a) => ({
-                addOnId: a.addOnId,
-                name: a.name,
-                price: a.price,
+              create: addOns.map((addOn) => ({
+                addOnId: addOn.addOnId,
+                name: addOn.name,
+                price: addOn.price,
               })),
             }
           : undefined,
@@ -152,20 +162,8 @@ export class CartService {
     }
 
     // Validate add-ons and calculate prices from database
-    let addOnsPrice = 0;
-    if (item.addOns && item.addOns.length > 0) {
-      const validAddOnIds = menuItem.addOns.map((a) => a.id);
-      for (const addOn of item.addOns) {
-        if (!validAddOnIds.includes(addOn.addOnId)) {
-          throw new ApiError(400, `Invalid add-on: ${addOn.name}`);
-        }
-        // Get add-on price from database, not frontend
-        const validAddOn = menuItem.addOns.find((a) => a.id === addOn.addOnId);
-        if (validAddOn) {
-          addOnsPrice += Number(validAddOn.price);
-        }
-      }
-    }
+    const addOns = resolveAuthoritativeAddOns(menuItem.addOns, item.addOns);
+    const addOnsPrice = addOns.reduce((sum, addOn) => sum + addOn.price, 0);
 
     // Calculate prices from database (never trust frontend)
     const unitPrice = Number(menuItem.price);
@@ -179,12 +177,12 @@ export class CartService {
         quantity: item.quantity,
         unitPrice,
         totalPrice,
-        addOns: item.addOns
+        addOns: addOns.length > 0
           ? {
-              create: item.addOns.map((a) => ({
-                addOnId: a.addOnId,
-                name: a.name,
-                price: a.price,
+              create: addOns.map((addOn) => ({
+                addOnId: addOn.addOnId,
+                name: addOn.name,
+                price: addOn.price,
               })),
             }
           : undefined,
@@ -227,20 +225,10 @@ export class CartService {
     }
 
     // Validate add-ons and calculate prices from database
-    let addOnsPrice = 0;
-    if (data.addOns) {
-      const validAddOnIds = cartItem.menuItem.addOns.map((a) => a.id);
-      for (const addOn of data.addOns) {
-        if (!validAddOnIds.includes(addOn.addOnId)) {
-          throw new ApiError(400, `Invalid add-on: ${addOn.name}`);
-        }
-        // Get add-on price from database, not frontend
-        const validAddOn = cartItem.menuItem.addOns.find((a) => a.id === addOn.addOnId);
-        if (validAddOn) {
-          addOnsPrice += Number(validAddOn.price);
-        }
-      }
-    }
+    const addOns = data.addOns === undefined
+      ? undefined
+      : resolveAuthoritativeAddOns(cartItem.menuItem.addOns, data.addOns);
+    const addOnsPrice = (addOns || []).reduce((sum, addOn) => sum + addOn.price, 0);
 
     // Recalculate prices from database (never trust frontend)
     const unitPrice = Number(cartItem.menuItem.price);
@@ -253,13 +241,13 @@ export class CartService {
         data: {
           quantity: data.quantity,
           totalPrice,
-          addOns: data.addOns
+          addOns: addOns
             ? {
                 deleteMany: {},
-                create: data.addOns.map((a) => ({
-                  addOnId: a.addOnId,
-                  name: a.name,
-                  price: a.price,
+                create: addOns.map((addOn) => ({
+                  addOnId: addOn.addOnId,
+                  name: addOn.name,
+                  price: addOn.price,
                 })),
               }
             : undefined,

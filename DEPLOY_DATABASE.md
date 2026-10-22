@@ -135,13 +135,7 @@ npx prisma generate
 
 ### Subsequent Deployments
 
-Render automatically runs:
-```bash
-npm install
-npm run build
-npx prisma generate
-npx prisma migrate deploy
-```
+The backend container starts the application only; it does not run migrations on startup. Run `npm run migrate:deploy` as a separate, controlled release operation from a trusted runner with the intended `DATABASE_URL` provided through its protected environment. Verify the target database and review pending migrations before running the command. Do not run migrations against production as an incidental consequence of an application restart or scale event.
 
 ---
 

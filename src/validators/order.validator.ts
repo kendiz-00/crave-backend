@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 // Order item add-on validator
 export const orderItemAddOnSchema = z.object({
+  addOnId: z.string().uuid('Invalid add-on ID'),
   name: z.string().min(1, 'Add-on name is required'),
   price: z.number().nonnegative('Add-on price must be non-negative'),
 });
@@ -16,7 +17,7 @@ export const orderItemSchema = z.object({
 // Create order validator
 export const createOrderSchema = z.object({
   orderType: z.enum(['DELIVERY', 'PICKUP', 'DINE_IN']).default('DELIVERY'),
-  items: z.array(orderItemSchema).min(1, 'Order must have at least one item'),
+  items: z.array(orderItemSchema).optional(),
   customerName: z.string().min(2, 'Customer name must be at least 2 characters'),
   customerPhone: z.string().regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number'),
   customerEmail: z.string().email('Invalid email address').optional(),
@@ -27,6 +28,8 @@ export const createOrderSchema = z.object({
   rewardCodeUsed: z.string().optional(),
   rewardPointsUsed: z.number().int().nonnegative().optional(),
   claimedRewardId: z.string().optional().nullable(),
+  promoCodeUsed: z.string().optional(),
+  idempotencyKey: z.string().uuid().optional(),
 });
 
 // Update order status validator

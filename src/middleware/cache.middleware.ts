@@ -72,9 +72,12 @@ export const cleanExpiredCache = () => {
 
 let cacheCleanupInterval: NodeJS.Timeout | null = null;
 
-// Clean expired cache every 5 minutes
-if (!config.isDevelopment) {
+// Clean expired cache every 5 minutes in production/staging (skip in test and development)
+if (!config.isDevelopment && process.env.NODE_ENV !== 'test') {
   cacheCleanupInterval = setInterval(cleanExpiredCache, 5 * 60 * 1000);
+  if (cacheCleanupInterval && typeof cacheCleanupInterval.unref === 'function') {
+    cacheCleanupInterval.unref();
+  }
 }
 
 /**
