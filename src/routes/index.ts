@@ -11,6 +11,7 @@ import rewardRoute from '@/routes/reward.route';
 import paymentRoute from '@/routes/payment.route';
 import seedRoutes from "./seed.route";
 import debugRoute from '@/routes/debug.route';
+import simplePromoRoute from '@/routes/simple-promo.route';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/api/rewards', rewardRoute);
 router.use('/api/payments', paymentRoute);
 router.use("/seed", seedRoutes);
 router.use('/debug', debugRoute);
+router.use('/api/simple-promo', simplePromoRoute);
 
 export default router;

@@ -30,3 +30,4 @@ export {
 } from './category.controller';
 export { cartController } from './cart.controller';
 export { orderController } from './order.controller';
+export { simplePromoController } from './simple-promo.controller';
