@@ -12,6 +12,7 @@ import paymentRoute from '@/routes/payment.route';
 import seedRoutes from "./seed.route";
 import debugRoute from '@/routes/debug.route';
 import promoCodeRoute from '@/routes/promo-code.route';
+import guestOrderRoute from '@/routes/guest-order.route';
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use('/api/payments', paymentRoute);
 router.use("/seed", seedRoutes);
 router.use('/debug', debugRoute);
 router.use('/api', promoCodeRoute);
+router.use('/api/guest-orders', guestOrderRoute);
 
 export default router;
