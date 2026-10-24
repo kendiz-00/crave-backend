@@ -9,6 +9,12 @@ const PROMO_CODES: Record<string, { code: string; discountType: string; discount
     discountValue: 10,
     active: true,
   },
+  CRAVE15: {
+    code: 'CRAVE15',
+    discountType: 'PERCENTAGE',
+    discountValue: 15,
+    active: true,
+  },
 };
 
 export class SimplePromoController {
@@ -33,8 +39,8 @@ export class SimplePromoController {
         throw new ApiError(400, 'Promo code is not active');
       }
 
-      // Calculate discount (10% for CORPERATE)
-      const discountAmount = promoCode.discountValue; // 10%
+      // Calculate discount based on promo code percentage
+      const discountAmount = promoCode.discountValue;
 
       res.json({
         valid: true,
