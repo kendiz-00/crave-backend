@@ -15,6 +15,12 @@ const PROMO_CODES: Record<string, { code: string; discountType: string; discount
     discountValue: 15,
     active: true,
   },
+  BILLS: {
+    code: 'BILLS',
+    discountType: 'PERCENTAGE',
+    discountValue: 20,
+    active: true,
+  },
 };
 
 export class SimplePromoController {
